@@ -76,6 +76,9 @@ const CLIENT_SECRET = process.env.HCA_CLIENT_SECRET!;
 const REDIRECT_URI = process.env.HCA_REDIRECT_URI!;
 
 const pendingStates = new Set<string>();
+// Maps OAuth `state` -> the web game's URL to redirect back to after login,
+// only populated when the login was initiated from a web (HTML5) export.
+const pendingWebRedirects = new Map<string, string>();
 
 interface HackClubTokenResponse {
   access_token: string;
@@ -98,9 +101,14 @@ interface HackClubMeResponse {
   scopes: string[];
 }
 
-router.get("/auth/hackclub", (_req, res) => {
+router.get("/auth/hackclub", (req, res) => {
   const state = crypto.randomBytes(16).toString("hex");
   pendingStates.add(state);
+
+  const webRedirect = req.query.web_redirect as string | undefined;
+  if (webRedirect) {
+    pendingWebRedirects.set(state, webRedirect);
+  }
 
   const url = new URL(`${HCA_BASE_URL}/oauth/authorize`);
   url.searchParams.set("client_id", CLIENT_ID);
@@ -123,6 +131,9 @@ router.get("/auth/hackclub/callback", async (req, res) => {
     return res.status(400).send("Invalid OAuth state");
   }
   pendingStates.delete(state);
+
+  const webRedirect = pendingWebRedirects.get(state);
+  pendingWebRedirects.delete(state);
 
   const tokenRes = await fetch(`${HCA_BASE_URL}/oauth/token`, {
     method: "POST",
@@ -214,7 +225,9 @@ router.get("/auth/hackclub/callback", async (req, res) => {
 
   const sessionToken = issueSessionToken({ userId, displayName });
 
-  const localCallback = new URL("http://localhost:7777/callback");
+  const localCallback = new URL(
+    webRedirect ?? "http://localhost:7777/callback",
+  );
   localCallback.searchParams.set("token", sessionToken);
   localCallback.searchParams.set("name", displayName);
 
