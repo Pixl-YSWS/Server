@@ -14,6 +14,7 @@ const httpServer = createServer(app);
 attachWebSocketServer(httpServer);
 
 const PORT = process.env.PORT ? Number(process.env.PORT) : 3000;
-httpServer.listen(PORT, () => {
-  console.log(`Server listening on :${PORT}`);
+const HOST = "0.0.0.0";
+httpServer.listen(PORT, HOST, () => {
+  console.log(`Server listening on ${HOST}:${PORT}`);
 });
