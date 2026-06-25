@@ -31,9 +31,9 @@ function broadcastToScene(
   }
 }
 
-function snapshotForScene(scene: string) {
+function snapshotForScene(scene: string, exceptUserId?: string) {
   return Array.from(players.values())
-    .filter((p) => p.scene === scene)
+    .filter((p) => p.scene === scene && p.userId !== exceptUserId)
     .map((p) => ({
       userId: p.userId,
       displayName: p.displayName,
@@ -62,14 +62,23 @@ export function attachWebSocketServer(httpServer: Server) {
   const wss = new WebSocketServer({ server: httpServer, path: "/ws" });
 
   wss.on("connection", (ws, req) => {
+    console.log("New WS connection attempt from", req.socket.remoteAddress);
     const url = new URL(req.url ?? "", "http://localhost");
     const token = url.searchParams.get("token");
     const session = token ? verifySessionToken(token) : null;
 
     if (!session) {
+      console.log("Connection rejected: invalid/missing token");
       ws.close(4001, "Unauthorized");
       return;
     }
+
+    console.log(
+      "Connection authorized for userId:",
+      session.userId,
+      "name:",
+      session.displayName,
+    );
 
     let player: ConnectedPlayer | null = null;
 
@@ -96,6 +105,13 @@ export function attachWebSocketServer(httpServer: Server) {
       };
       players.set(session.userId, player);
 
+      console.log(
+        "Player registered. Scene:",
+        player.scene,
+        "| All active players:",
+        Array.from(players.values()).map((p) => `${p.displayName}(${p.scene})`),
+      );
+
       ws.send(
         JSON.stringify({
           type: "init",
@@ -105,7 +121,7 @@ export function attachWebSocketServer(httpServer: Server) {
             posX: player.posX,
             posY: player.posY,
           },
-          players: snapshotForScene(player.scene),
+          players: snapshotForScene(player.scene, player.userId),
         }),
       );
 
@@ -159,6 +175,17 @@ export function attachWebSocketServer(httpServer: Server) {
       if (msg.type === "change_scene") {
         const oldScene = player.scene;
         player.scene = msg.scene;
+        console.log(
+          player.displayName,
+          "changed scene:",
+          oldScene,
+          "->",
+          player.scene,
+          "| players now in",
+          player.scene,
+          ":",
+          snapshotForScene(player.scene).map((p) => p.displayName),
+        );
 
         broadcastToScene(
           oldScene,
@@ -175,7 +202,7 @@ export function attachWebSocketServer(httpServer: Server) {
               posX: player.posX,
               posY: player.posY,
             },
-            players: snapshotForScene(player.scene),
+            players: snapshotForScene(player.scene, player.userId),
           }),
         );
 
@@ -198,6 +225,7 @@ export function attachWebSocketServer(httpServer: Server) {
 
     ws.on("close", () => {
       if (!player) return;
+      console.log(player.displayName, "disconnected from scene:", player.scene);
       players.delete(player.userId);
       persist(player).catch(console.error);
       broadcastToScene(player.scene, {

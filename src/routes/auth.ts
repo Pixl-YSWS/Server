@@ -5,6 +5,71 @@ import { issueSessionToken } from "../auth/session.js";
 
 const router = Router();
 
+router.get("/auth/demo", async (req, res) => {
+  if (process.env.ALLOW_DEMO_LOGIN !== "true") {
+    return res.status(403).json({ error: "Demo login disabled" });
+  }
+
+  const name = (req.query.name as string)?.trim();
+  if (!name) {
+    return res.status(400).json({ error: "Missing ?name= query param" });
+  }
+
+  const demoOauthId = `demo_${name.toLowerCase().replace(/[^a-z0-9]/g, "_")}`;
+
+  const { data: existingUsers, error: lookupError } = await supabase
+    .from("users")
+    .select("*")
+    .eq("oauth_provider", "demo")
+    .eq("oauth_id", demoOauthId)
+    .limit(1);
+
+  if (lookupError) {
+    console.error("Supabase lookup failed", lookupError);
+    return res.status(500).json({ error: "Database error" });
+  }
+
+  let userId: string;
+  let displayName: string;
+
+  if (existingUsers && existingUsers.length > 0) {
+    const existing = existingUsers[0] as UserRow;
+    userId = existing.id;
+    displayName = existing.display_name;
+  } else {
+    const { data: created, error: insertError } = await supabase
+      .from("users")
+      .insert({
+        oauth_provider: "demo",
+        oauth_id: demoOauthId,
+        display_name: name,
+        avatar_url: null,
+      })
+      .select()
+      .single();
+
+    if (insertError || !created) {
+      console.error("Supabase insert failed", insertError);
+      return res.status(500).json({ error: "Database error" });
+    }
+
+    const row = created as UserRow;
+    userId = row.id;
+    displayName = row.display_name;
+
+    const { error: stateError } = await supabase
+      .from("player_state")
+      .insert({ user_id: userId });
+
+    if (stateError) {
+      console.error("Failed to seed player_state", stateError);
+    }
+  }
+
+  const sessionToken = issueSessionToken({ userId, displayName });
+  res.json({ token: sessionToken, name: displayName });
+});
+
 const HCA_BASE_URL = "https://auth.hackclub.com";
 const CLIENT_ID = process.env.HCA_CLIENT_ID!;
 const CLIENT_SECRET = process.env.HCA_CLIENT_SECRET!;
