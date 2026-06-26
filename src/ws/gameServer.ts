@@ -11,6 +11,7 @@ interface ConnectedPlayer {
   posX: number;
   posY: number;
   direction: string;
+  character: number;
   lastSaved: number;
 }
 
@@ -40,6 +41,7 @@ function snapshotForScene(scene: string, exceptUserId?: string) {
       posX: p.posX,
       posY: p.posY,
       direction: p.direction,
+      character: p.character,
     }));
 }
 
@@ -117,6 +119,13 @@ export function attachWebSocketServer(httpServer: Server) {
 
       const state = (stateRows && stateRows[0]) as PlayerStateRow | undefined;
 
+      // Pull the player's chosen character/skin (defaults handled by the DB).
+      const { data: userRow } = await supabase
+        .from("users")
+        .select("character")
+        .eq("id", session.userId)
+        .single();
+
       player = {
         ws,
         userId: session.userId,
@@ -125,6 +134,7 @@ export function attachWebSocketServer(httpServer: Server) {
         posX: state?.pos_x ?? 0,
         posY: state?.pos_y ?? 0,
         direction: state?.direction ?? "bottom",
+        character: (userRow as { character?: number } | null)?.character ?? 1,
         lastSaved: Date.now(),
       };
       players.set(session.userId, player);
@@ -144,6 +154,7 @@ export function attachWebSocketServer(httpServer: Server) {
             displayName: player.displayName,
             posX: player.posX,
             posY: player.posY,
+            character: player.character,
           },
           players: snapshotForScene(player.scene, player.userId),
         }),
@@ -158,6 +169,7 @@ export function attachWebSocketServer(httpServer: Server) {
           posX: player.posX,
           posY: player.posY,
           direction: player.direction,
+          character: player.character,
         },
         player.userId,
       );
@@ -247,6 +259,7 @@ export function attachWebSocketServer(httpServer: Server) {
                 displayName: leaving.displayName,
                 posX: leaving.posX,
                 posY: leaving.posY,
+                character: leaving.character,
               },
               spawnAtDefault,
               players: snapshotForScene(newScene, leaving.userId),
@@ -262,10 +275,33 @@ export function attachWebSocketServer(httpServer: Server) {
               posX: leaving.posX,
               posY: leaving.posY,
               direction: leaving.direction,
+              character: leaving.character,
             },
             leaving.userId,
           );
         })().catch(console.error);
+      }
+
+      if (msg.type === "set_character") {
+        const n = Math.floor(Number(msg.character));
+        if (!Number.isFinite(n) || n < 1 || n > 9) return;
+        player.character = n;
+
+        // Persist the choice, then tell everyone in the scene (the sender
+        // included) so all clients re-skin this player.
+        void supabase
+          .from("users")
+          .update({ character: n })
+          .eq("id", player.userId)
+          .then(({ error }) => {
+            if (error) console.error("Failed to save character", error);
+          });
+
+        broadcastToScene(player.scene, {
+          type: "player_character",
+          userId: player.userId,
+          character: n,
+        });
       }
     });
 
