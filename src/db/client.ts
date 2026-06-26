@@ -18,7 +18,7 @@ export interface UserRow {
   oauth_id: string;
   display_name: string;
   avatar_url: string | null;
-  character: number;
+  skin: string;
   created_at: string;
 }
 
