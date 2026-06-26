@@ -43,19 +43,41 @@ function snapshotForScene(scene: string, exceptUserId?: string) {
     }));
 }
 
+// Position is now stored per (user, scene), so saving upserts the row for the
+// player's *current* scene rather than overwriting a single global position.
 async function persist(p: ConnectedPlayer) {
   const { error } = await supabase
     .from("player_state")
-    .update({
-      scene: p.scene,
-      pos_x: p.posX,
-      pos_y: p.posY,
-      direction: p.direction,
-      updated_at: new Date().toISOString(),
-    })
-    .eq("user_id", p.userId);
+    .upsert(
+      {
+        user_id: p.userId,
+        scene: p.scene,
+        pos_x: p.posX,
+        pos_y: p.posY,
+        direction: p.direction,
+        updated_at: new Date().toISOString(),
+      },
+      { onConflict: "user_id,scene" },
+    );
 
   if (error) console.error("Failed to persist player_state", error);
+}
+
+// Loads the saved position for one specific scene, or null if the player has
+// never been there before (caller then spawns them at the scene's default).
+async function loadSceneState(
+  userId: string,
+  scene: string,
+): Promise<PlayerStateRow | null> {
+  const { data, error } = await supabase
+    .from("player_state")
+    .select("*")
+    .eq("user_id", userId)
+    .eq("scene", scene)
+    .limit(1);
+
+  if (error) console.error("Failed to load scene state", error);
+  return (data && (data[0] as PlayerStateRow)) ?? null;
 }
 
 export function attachWebSocketServer(httpServer: Server) {
@@ -83,10 +105,12 @@ export function attachWebSocketServer(httpServer: Server) {
     let player: ConnectedPlayer | null = null;
 
     (async () => {
+      // Default to the player's most recently active scene/position.
       const { data: stateRows, error } = await supabase
         .from("player_state")
         .select("*")
         .eq("user_id", session.userId)
+        .order("updated_at", { ascending: false })
         .limit(1);
 
       if (error) console.error("Failed to load player_state", error);
@@ -173,53 +197,75 @@ export function attachWebSocketServer(httpServer: Server) {
       }
 
       if (msg.type === "change_scene") {
-        const oldScene = player.scene;
-        player.scene = msg.scene;
-        console.log(
-          player.displayName,
-          "changed scene:",
-          oldScene,
-          "->",
-          player.scene,
-          "| players now in",
-          player.scene,
-          ":",
-          snapshotForScene(player.scene).map((p) => p.displayName),
-        );
+        const leaving = player;
+        const oldScene = leaving.scene;
+        const newScene = msg.scene;
 
-        broadcastToScene(
-          oldScene,
-          { type: "player_left", userId: player.userId },
-          player.userId,
-        );
+        void (async () => {
+          // Save where the player was standing in the scene they're leaving so
+          // it's there when they come back.
+          await persist(leaving);
 
-        ws.send(
-          JSON.stringify({
-            type: "init",
-            you: {
-              userId: player.userId,
-              displayName: player.displayName,
-              posX: player.posX,
-              posY: player.posY,
+          broadcastToScene(
+            oldScene,
+            { type: "player_left", userId: leaving.userId },
+            leaving.userId,
+          );
+
+          // Move into the new scene at its own saved position. If there's no
+          // saved position yet, tell the client to use the scene's spawn point.
+          const saved = await loadSceneState(leaving.userId, newScene);
+          leaving.scene = newScene;
+          let spawnAtDefault = false;
+          if (saved) {
+            leaving.posX = saved.pos_x;
+            leaving.posY = saved.pos_y;
+            leaving.direction = saved.direction;
+          } else {
+            spawnAtDefault = true;
+            leaving.direction = "bottom";
+          }
+
+          console.log(
+            leaving.displayName,
+            "changed scene:",
+            oldScene,
+            "->",
+            newScene,
+            spawnAtDefault ? "(default spawn)" : "(restored position)",
+            "| players now in",
+            newScene,
+            ":",
+            snapshotForScene(newScene).map((p) => p.displayName),
+          );
+
+          ws.send(
+            JSON.stringify({
+              type: "init",
+              you: {
+                userId: leaving.userId,
+                displayName: leaving.displayName,
+                posX: leaving.posX,
+                posY: leaving.posY,
+              },
+              spawnAtDefault,
+              players: snapshotForScene(newScene, leaving.userId),
+            }),
+          );
+
+          broadcastToScene(
+            newScene,
+            {
+              type: "player_joined",
+              userId: leaving.userId,
+              displayName: leaving.displayName,
+              posX: leaving.posX,
+              posY: leaving.posY,
+              direction: leaving.direction,
             },
-            players: snapshotForScene(player.scene, player.userId),
-          }),
-        );
-
-        broadcastToScene(
-          player.scene,
-          {
-            type: "player_joined",
-            userId: player.userId,
-            displayName: player.displayName,
-            posX: player.posX,
-            posY: player.posY,
-            direction: player.direction,
-          },
-          player.userId,
-        );
-
-        persist(player).catch(console.error);
+            leaving.userId,
+          );
+        })().catch(console.error);
       }
     });
 
