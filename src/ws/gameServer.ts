@@ -19,6 +19,13 @@ const SKIN_RE = /^(cvc:[1-9]|cv1:b[1-3]h[0-6]t[1-6]o[1-6])$/;
 
 const players = new Map<string, ConnectedPlayer>();
 
+// The village is a private, per-player space: everyone requests the scene
+// "village", but each player gets their own room so they don't share it.
+// Other scenes (openworld, house_interior) stay shared.
+function roomFor(userId: string, scene: string): string {
+  return scene === "village" ? `village:${userId}` : scene;
+}
+
 const SAVE_INTERVAL_MS = 5000;
 
 function broadcastToScene(
@@ -132,7 +139,7 @@ export function attachWebSocketServer(httpServer: Server) {
         ws,
         userId: session.userId,
         displayName: session.displayName,
-        scene: state?.scene ?? "village",
+        scene: roomFor(session.userId, state?.scene ?? "village"),
         posX: state?.pos_x ?? 0,
         posY: state?.pos_y ?? 0,
         direction: state?.direction ?? "bottom",
@@ -213,7 +220,7 @@ export function attachWebSocketServer(httpServer: Server) {
       if (msg.type === "change_scene") {
         const leaving = player;
         const oldScene = leaving.scene;
-        const newScene = msg.scene;
+        const newScene = roomFor(leaving.userId, msg.scene);
 
         void (async () => {
           // Save where the player was standing in the scene they're leaving so
