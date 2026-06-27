@@ -17,6 +17,11 @@ interface ConnectedPlayer {
 
 const SKIN_RE = /^(cvc:[1-9]|cv1:b[1-3]h[0-6]t[1-6]o[1-6])$/;
 
+const EMOTE_KEYS = new Set([
+  "happy", "laugh", "heart", "sad", "angry", "love", "cry", "idea",
+  "music", "sleep", "star", "question", "alert", "exclaim", "dizzy",
+]);
+
 const players = new Map<string, ConnectedPlayer>();
 
 // The village is a private, per-player space: everyone requests the scene
@@ -184,8 +189,25 @@ export function attachWebSocketServer(httpServer: Server) {
       );
     })();
 
-    ws.on("message", (raw) => {
+    ws.on("message", (raw, isBinary) => {
       if (!player) return;
+
+      // Binary frames are voice clips: relay them to everyone in the same
+      // scene (proximity = scene), tagged with the speaker's id.
+      if (isBinary) {
+        const data = raw as Buffer;
+        if (data.length > 16000) return;
+        const idBuf = Buffer.from(player.userId, "utf8");
+        const header = Buffer.alloc(2);
+        header.writeUInt16LE(idBuf.length, 0);
+        const frame = Buffer.concat([header, idBuf, data]);
+        for (const [uid, p] of players) {
+          if (uid === player.userId || p.scene !== player.scene) continue;
+          if (p.ws.readyState === WebSocket.OPEN) p.ws.send(frame, { binary: true });
+        }
+        return;
+      }
+
       let msg: any;
       try {
         msg = JSON.parse(raw.toString());
@@ -325,6 +347,16 @@ export function attachWebSocketServer(httpServer: Server) {
           userId: player.userId,
           displayName: player.displayName,
           text,
+        });
+      }
+
+      if (msg.type === "emote") {
+        const key = String(msg.key ?? "");
+        if (!EMOTE_KEYS.has(key)) return;
+        broadcastToScene(player.scene, {
+          type: "emote",
+          userId: player.userId,
+          key,
         });
       }
     });

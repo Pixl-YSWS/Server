@@ -4,6 +4,7 @@ import { createServer } from "http";
 import authRouter from "./routes/auth.js";
 import hackatimeRouter from "./routes/hackatime.js";
 import projectsRouter from "./routes/projects.js";
+import notificationsRouter from "./routes/notifications.js";
 import { attachWebSocketServer } from "./ws/gameServer.js";
 
 const app = express();
@@ -27,6 +28,7 @@ app.use(express.json());
 app.use(authRouter);
 app.use(hackatimeRouter);
 app.use(projectsRouter);
+app.use(notificationsRouter);
 
 app.get("/", (_req, res) => res.json({ name: "pixl-server", status: "ok" }));
 app.get("/health", (_req, res) => res.json({ ok: true }));

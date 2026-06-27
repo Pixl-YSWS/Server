@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { verifySessionToken } from "../auth/session.js";
 import { supabase } from "../db/client.js";
+import { addNotification } from "./notifications.js";
 
 const router = Router();
 
@@ -56,6 +57,7 @@ router.post("/api/projects", async (req, res) => {
     console.error("[projects] create failed", error);
     return res.status(500).json({ ok: false });
   }
+  void addNotification(session.userId, "Project logged", `You logged "${fields.name}".`);
   res.json({ ok: true, project: data });
 });
 
