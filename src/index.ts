@@ -7,6 +7,22 @@ import projectsRouter from "./routes/projects.js";
 import { attachWebSocketServer } from "./ws/gameServer.js";
 
 const app = express();
+
+// CORS: the web export (served from another origin, with COEP require-corp)
+// reaches us via the browser's fetch, which enforces CORS. Tokens travel in the
+// query string, not cookies, so a permissive origin is safe here.
+app.use((req, res, next) => {
+  res.header("Access-Control-Allow-Origin", "*");
+  res.header("Access-Control-Allow-Methods", "GET,POST,PUT,DELETE,OPTIONS");
+  res.header("Access-Control-Allow-Headers", "Content-Type");
+  res.header("Cross-Origin-Resource-Policy", "cross-origin");
+  if (req.method === "OPTIONS") {
+    res.sendStatus(204);
+    return;
+  }
+  next();
+});
+
 app.use(express.json());
 app.use(authRouter);
 app.use(hackatimeRouter);
