@@ -30,13 +30,23 @@ router.post("/api/projects", async (req, res) => {
 
   const name = String(req.body?.name ?? "").trim().slice(0, 120);
   if (!name) return res.status(400).json({ ok: false, error: "name_required" });
+  const description = String(req.body?.description ?? "").trim().slice(0, 2000);
+  const repoUrl = String(req.body?.repoUrl ?? "").trim().slice(0, 500);
+  const demoUrl = String(req.body?.demoUrl ?? "").trim().slice(0, 500);
   const hackatimeProjects = Array.isArray(req.body?.hackatimeProjects)
     ? req.body.hackatimeProjects.map((p: unknown) => String(p)).slice(0, 50)
     : [];
 
   const { data, error } = await supabase
     .from("projects")
-    .insert({ user_id: session.userId, name, hackatime_projects: hackatimeProjects })
+    .insert({
+      user_id: session.userId,
+      name,
+      description,
+      repo_url: repoUrl,
+      demo_url: demoUrl,
+      hackatime_projects: hackatimeProjects,
+    })
     .select()
     .single();
   if (error) {
