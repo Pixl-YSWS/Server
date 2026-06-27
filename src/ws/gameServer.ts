@@ -305,6 +305,21 @@ export function attachWebSocketServer(httpServer: Server) {
           skin,
         });
       }
+
+      if (msg.type === "chat") {
+        const text = String(msg.text ?? "")
+          .replace(/\s+/g, " ")
+          .trim()
+          .slice(0, 200);
+        if (!text) return;
+
+        broadcastToScene(player.scene, {
+          type: "chat",
+          userId: player.userId,
+          displayName: player.displayName,
+          text,
+        });
+      }
     });
 
     ws.on("close", () => {
