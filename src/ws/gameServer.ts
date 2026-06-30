@@ -96,6 +96,66 @@ async function loadSceneState(
   return (data && (data[0] as PlayerStateRow)) ?? null;
 }
 
+// NPCs only live in the village, which is a private per-player room. Strip the
+// `:userId` suffix so NPC rows key off the base scene name the client uses.
+function baseSceneName(room: string): string {
+  return room.startsWith("village:") ? "village" : room;
+}
+
+// Sends the player their saved NPC positions for a scene so the client can
+// place villagers where they last left them (empty list on a first visit).
+async function sendNpcInit(p: ConnectedPlayer, scene: string) {
+  const { data, error } = await supabase
+    .from("npc_state")
+    .select("npc_id,pos_x,pos_y")
+    .eq("user_id", p.userId)
+    .eq("scene", scene);
+
+  if (error) console.error("Failed to load npc_state", error);
+  if (p.ws.readyState !== WebSocket.OPEN) return;
+
+  p.ws.send(
+    JSON.stringify({
+      type: "npc_init",
+      scene,
+      npcs: (data ?? []).map((r) => ({
+        id: r.npc_id,
+        posX: r.pos_x,
+        posY: r.pos_y,
+      })),
+    }),
+  );
+}
+
+// Upserts the positions the client reports for its NPCs in a scene.
+async function persistNpcs(
+  userId: string,
+  scene: string,
+  list: Array<{ id: unknown; posX: unknown; posY: unknown }>,
+) {
+  const rows = [];
+  for (const n of list) {
+    const id = String(n.id ?? "").slice(0, 64);
+    const px = Number(n.posX);
+    const py = Number(n.posY);
+    if (!id || !Number.isFinite(px) || !Number.isFinite(py)) continue;
+    rows.push({
+      user_id: userId,
+      scene,
+      npc_id: id,
+      pos_x: px,
+      pos_y: py,
+      updated_at: new Date().toISOString(),
+    });
+  }
+  if (rows.length === 0) return;
+
+  const { error } = await supabase
+    .from("npc_state")
+    .upsert(rows, { onConflict: "user_id,scene,npc_id" });
+  if (error) console.error("Failed to persist npc_state", error);
+}
+
 export function attachWebSocketServer(httpServer: Server) {
   const wss = new WebSocketServer({ server: httpServer, path: "/ws" });
 
@@ -173,6 +233,8 @@ export function attachWebSocketServer(httpServer: Server) {
           players: snapshotForScene(player.scene, player.userId),
         }),
       );
+
+      void sendNpcInit(player, baseSceneName(player.scene));
 
       broadcastToScene(
         player.scene,
@@ -297,6 +359,8 @@ export function attachWebSocketServer(httpServer: Server) {
             }),
           );
 
+          void sendNpcInit(leaving, baseSceneName(newScene));
+
           broadcastToScene(
             newScene,
             {
@@ -358,6 +422,13 @@ export function attachWebSocketServer(httpServer: Server) {
           userId: player.userId,
           key,
         });
+      }
+
+      if (msg.type === "save_npcs") {
+        const scene = baseSceneName(String(msg.scene ?? ""));
+        const list = Array.isArray(msg.npcs) ? msg.npcs : [];
+        if (!scene || list.length === 0 || list.length > 64) return;
+        persistNpcs(player.userId, scene, list).catch(console.error);
       }
     });
 
