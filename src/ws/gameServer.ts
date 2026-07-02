@@ -2,6 +2,18 @@ import { WebSocketServer, WebSocket } from "ws";
 import type { Server } from "http";
 import { verifySessionToken } from "../auth/session.js";
 import { supabase, type PlayerStateRow } from "../db/client.js";
+import {
+  type Lobby,
+  lobbies,
+  lobbyIdFromScene,
+  lobbyScene,
+  loadLobbies,
+  createLobby,
+  renameLobby,
+  setLobbyVisibility,
+  deleteLobby,
+  lobbyInfoFor,
+} from "./lobbies.js";
 
 interface ConnectedPlayer {
   ws: WebSocket;
@@ -13,6 +25,7 @@ interface ConnectedPlayer {
   direction: string;
   skin: string;
   lastSaved: number;
+  lobbyGrant: string;
 }
 
 const SKIN_RE = /^(cvc:[1-9]|cv1:b[1-3]h[0-6]t[1-6]o[1-6])$/;
@@ -26,9 +39,65 @@ const players = new Map<string, ConnectedPlayer>();
 
 // The village is a private, per-player space: everyone requests the scene
 // "village", but each player gets their own room so they don't share it.
-// Other scenes (openworld, house_interior) stay shared.
+// Other scenes (openworld, house_interior) stay shared. Lobby scenes
+// ("lobby:<CODE>") are shared rooms scoped to one lobby instance.
 function roomFor(userId: string, scene: string): string {
   return scene === "village" ? `village:${userId}` : scene;
+}
+
+function lobbyMemberCount(id: string, exceptUserId?: string): number {
+  const room = lobbyScene(id);
+  let n = 0;
+  for (const [uid, p] of players) {
+    if (uid === exceptUserId) continue;
+    if (p.scene === room) n++;
+  }
+  return n;
+}
+
+function lobbyJoinError(
+  l: Lobby | undefined,
+  userId: string,
+  password: string,
+): string | null {
+  if (!l) return "That lobby doesn't exist.";
+  if (lobbyMemberCount(l.id, userId) >= l.capacity) return "That lobby is full.";
+  if (!l.isPublic && l.ownerId !== userId && password !== l.password)
+    return "Wrong password.";
+  return null;
+}
+
+function pickPublicLobby(): Lobby | null {
+  let best: Lobby | null = null;
+  let bestCount = -1;
+  for (const l of lobbies.values()) {
+    if (!l.isPublic) continue;
+    const c = lobbyMemberCount(l.id);
+    if (c < l.capacity && c > bestCount) {
+      best = l;
+      bestCount = c;
+    }
+  }
+  return best ?? createLobby({ isPublic: true, ownerId: "" });
+}
+
+function lobbyListFor(userId: string) {
+  return [...lobbies.values()].map((l) =>
+    lobbyInfoFor(l, lobbyMemberCount(l.id), userId),
+  );
+}
+
+function closeLobby(id: string) {
+  deleteLobby(id);
+  const room = lobbyScene(id);
+  const payload = JSON.stringify({
+    type: "lobby_closed",
+    reason: "This lobby was closed by its owner.",
+  });
+  for (const p of players.values()) {
+    if (p.scene === room && p.ws.readyState === WebSocket.OPEN)
+      p.ws.send(payload);
+  }
 }
 
 const SAVE_INTERVAL_MS = 5000;
@@ -99,7 +168,9 @@ async function loadSceneState(
 // NPCs only live in the village, which is a private per-player room. Strip the
 // `:userId` suffix so NPC rows key off the base scene name the client uses.
 function baseSceneName(room: string): string {
-  return room.startsWith("village:") ? "village" : room;
+  if (room.startsWith("village:")) return "village";
+  if (lobbyIdFromScene(room)) return "open_world";
+  return room;
 }
 
 // Sends the player their saved NPC positions for a scene so the client can
@@ -159,6 +230,8 @@ async function persistNpcs(
 export function attachWebSocketServer(httpServer: Server) {
   const wss = new WebSocketServer({ server: httpServer, path: "/ws" });
 
+  void loadLobbies();
+
   wss.on("connection", (ws, req) => {
     console.log("New WS connection attempt from", req.socket.remoteAddress);
     const url = new URL(req.url ?? "", "http://localhost");
@@ -200,16 +273,34 @@ export function attachWebSocketServer(httpServer: Server) {
         .eq("id", session.userId)
         .single();
 
+      let startState: PlayerStateRow | undefined | null = state;
+      let startScene = state?.scene ?? "village";
+      const savedLobbyId = lobbyIdFromScene(startScene);
+      let lobbyGrant = "";
+      if (savedLobbyId) {
+        const l = lobbies.get(savedLobbyId);
+        if (!l || lobbyMemberCount(savedLobbyId, session.userId) >= l.capacity) {
+          startScene = "village";
+          startState = await loadSceneState(
+            session.userId,
+            roomFor(session.userId, "village"),
+          );
+        } else {
+          lobbyGrant = savedLobbyId;
+        }
+      }
+
       player = {
         ws,
         userId: session.userId,
         displayName: session.displayName,
-        scene: roomFor(session.userId, state?.scene ?? "village"),
-        posX: state?.pos_x ?? 0,
-        posY: state?.pos_y ?? 0,
-        direction: state?.direction ?? "bottom",
+        scene: roomFor(session.userId, startScene),
+        posX: startState?.pos_x ?? 0,
+        posY: startState?.pos_y ?? 0,
+        direction: startState?.direction ?? "bottom",
         skin: (userRow as { skin?: string } | null)?.skin ?? "cvc:1",
         lastSaved: Date.now(),
+        lobbyGrant,
       };
       players.set(session.userId, player);
 
@@ -223,6 +314,7 @@ export function attachWebSocketServer(httpServer: Server) {
       ws.send(
         JSON.stringify({
           type: "init",
+          scene: player.scene,
           you: {
             userId: player.userId,
             displayName: player.displayName,
@@ -304,7 +396,34 @@ export function attachWebSocketServer(httpServer: Server) {
       if (msg.type === "change_scene") {
         const leaving = player;
         const oldScene = leaving.scene;
-        const newScene = roomFor(leaving.userId, msg.scene);
+        let requested = String(msg.scene ?? "");
+
+        const targetLobbyId = lobbyIdFromScene(requested);
+        if (targetLobbyId) {
+          const l = lobbies.get(targetLobbyId);
+          const granted =
+            l &&
+            (l.isPublic ||
+              l.ownerId === leaving.userId ||
+              leaving.lobbyGrant === targetLobbyId);
+          const full =
+            l && lobbyMemberCount(targetLobbyId, leaving.userId) >= l.capacity;
+          if (!l || !granted || full) {
+            ws.send(
+              JSON.stringify({
+                type: "lobby_denied",
+                reason: !l
+                  ? "That lobby no longer exists."
+                  : full
+                    ? "That lobby is full."
+                    : "You need the lobby's password to enter.",
+              }),
+            );
+            requested = "open_world";
+          }
+        }
+
+        const newScene = roomFor(leaving.userId, requested);
 
         void (async () => {
           // Save where the player was standing in the scene they're leaving so
@@ -347,6 +466,7 @@ export function attachWebSocketServer(httpServer: Server) {
           ws.send(
             JSON.stringify({
               type: "init",
+              scene: newScene,
               you: {
                 userId: leaving.userId,
                 displayName: leaving.displayName,
@@ -422,6 +542,112 @@ export function attachWebSocketServer(httpServer: Server) {
           userId: player.userId,
           key,
         });
+      }
+
+      if (msg.type === "lobby_list") {
+        ws.send(
+          JSON.stringify({
+            type: "lobby_list",
+            lobbies: lobbyListFor(player.userId),
+          }),
+        );
+      }
+
+      if (msg.type === "lobby_create") {
+        const lobby = createLobby({
+          isPublic: !!msg.isPublic,
+          name: typeof msg.name === "string" ? msg.name : "",
+          ownerId: player.userId,
+        });
+        if (!lobby) {
+          ws.send(
+            JSON.stringify({
+              type: "lobby_denied",
+              reason: "Too many lobbies exist right now.",
+            }),
+          );
+          return;
+        }
+        player.lobbyGrant = lobby.id;
+        ws.send(
+          JSON.stringify({
+            type: "lobby_joined",
+            lobby: lobbyInfoFor(lobby, 0, player.userId),
+          }),
+        );
+      }
+
+      if (msg.type === "lobby_join") {
+        const id = String(msg.id ?? "").trim().toUpperCase();
+        const password = String(msg.password ?? "").trim();
+        const lobby = lobbies.get(id);
+        const err = lobbyJoinError(lobby, player.userId, password);
+        if (err || !lobby) {
+          ws.send(
+            JSON.stringify({
+              type: "lobby_denied",
+              reason: err ?? "That lobby doesn't exist.",
+            }),
+          );
+          return;
+        }
+        player.lobbyGrant = id;
+        const info = lobbyInfoFor(lobby, lobbyMemberCount(id), player.userId);
+        if (!lobby.isPublic) info.password = lobby.password;
+        ws.send(JSON.stringify({ type: "lobby_joined", lobby: info }));
+      }
+
+      if (msg.type === "lobby_quick_join") {
+        const lobby = pickPublicLobby();
+        if (!lobby) {
+          ws.send(
+            JSON.stringify({
+              type: "lobby_denied",
+              reason: "No lobbies are available right now.",
+            }),
+          );
+          return;
+        }
+        player.lobbyGrant = lobby.id;
+        ws.send(
+          JSON.stringify({
+            type: "lobby_joined",
+            lobby: lobbyInfoFor(
+              lobby,
+              lobbyMemberCount(lobby.id),
+              player.userId,
+            ),
+          }),
+        );
+      }
+
+      if (msg.type === "lobby_manage") {
+        const lobby = lobbies.get(String(msg.id ?? ""));
+        if (!lobby || lobby.ownerId !== player.userId) {
+          ws.send(
+            JSON.stringify({
+              type: "lobby_denied",
+              reason: "That lobby isn't yours to manage.",
+            }),
+          );
+          return;
+        }
+        const action = String(msg.action ?? "");
+        if (action === "rename" && typeof msg.name === "string") {
+          renameLobby(lobby, msg.name);
+        } else if (action === "visibility") {
+          setLobbyVisibility(lobby, !!msg.isPublic);
+        } else if (action === "delete") {
+          closeLobby(lobby.id);
+        } else {
+          return;
+        }
+        ws.send(
+          JSON.stringify({
+            type: "lobby_list",
+            lobbies: lobbyListFor(player.userId),
+          }),
+        );
       }
 
       if (msg.type === "save_npcs") {
