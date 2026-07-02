@@ -302,6 +302,20 @@ export function attachWebSocketServer(httpServer: Server) {
         lastSaved: Date.now(),
         lobbyGrant,
       };
+      const stale = players.get(session.userId);
+      if (stale && stale.ws !== ws) {
+        players.delete(session.userId);
+        broadcastToScene(stale.scene, {
+          type: "player_left",
+          userId: stale.userId,
+        });
+        if (
+          stale.ws.readyState === WebSocket.OPEN ||
+          stale.ws.readyState === WebSocket.CONNECTING
+        ) {
+          stale.ws.close(4002, "Replaced by a newer connection");
+        }
+      }
       players.set(session.userId, player);
 
       console.log(
@@ -345,6 +359,7 @@ export function attachWebSocketServer(httpServer: Server) {
 
     ws.on("message", (raw, isBinary) => {
       if (!player) return;
+      if (players.get(player.userId) !== player) return;
 
       // Binary frames are voice clips: relay them to everyone in the same
       // scene (proximity = scene), tagged with the speaker's id.
@@ -660,6 +675,10 @@ export function attachWebSocketServer(httpServer: Server) {
 
     ws.on("close", () => {
       if (!player) return;
+      if (players.get(player.userId) !== player) {
+        console.log(player.displayName, "stale connection closed");
+        return;
+      }
       console.log(player.displayName, "disconnected from scene:", player.scene);
       players.delete(player.userId);
       persist(player).catch(console.error);
