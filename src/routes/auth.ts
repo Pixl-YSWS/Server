@@ -188,12 +188,14 @@ router.get("/auth/hackclub/callback", async (req, res) => {
 
   let userId: string;
   let displayName: string;
+  let isNewUser = false;
 
   if (existingUsers && existingUsers.length > 0) {
     const existing = existingUsers[0] as UserRow;
     userId = existing.id;
     displayName = existing.display_name;
   } else {
+    isNewUser = true;
     const { data: created, error: insertError } = await supabase
       .from("users")
       .insert({
@@ -230,6 +232,7 @@ router.get("/auth/hackclub/callback", async (req, res) => {
   );
   localCallback.searchParams.set("token", sessionToken);
   localCallback.searchParams.set("name", displayName);
+  if (isNewUser) localCallback.searchParams.set("new", "1");
 
   res.redirect(localCallback.toString());
 });
