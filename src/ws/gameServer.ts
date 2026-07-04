@@ -1,6 +1,7 @@
 import { WebSocketServer, WebSocket } from "ws";
 import type { Server } from "http";
 import { verifySessionToken } from "../auth/session.js";
+import { censorChat } from "../moderation.js";
 import { supabase, type PlayerStateRow } from "../db/client.js";
 import {
   type Lobby,
@@ -542,10 +543,12 @@ export function attachWebSocketServer(httpServer: Server) {
       }
 
       if (msg.type === "chat") {
-        const text = String(msg.text ?? "")
-          .replace(/\s+/g, " ")
-          .trim()
-          .slice(0, 200);
+        const text = censorChat(
+          String(msg.text ?? "")
+            .replace(/\s+/g, " ")
+            .trim()
+            .slice(0, 200),
+        );
         if (!text) return;
 
         broadcastToScene(player.scene, {
