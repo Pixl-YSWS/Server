@@ -442,8 +442,10 @@ export function attachWebSocketServer(httpServer: Server) {
 
         void (async () => {
           // Save where the player was standing in the scene they're leaving so
-          // it's there when they come back.
-          await persist(leaving);
+          // it's there when they come back. persist() snapshots the row
+          // synchronously, so it's safe to let the upsert finish in the
+          // background instead of stalling the init reply on a DB round-trip.
+          void persist(leaving);
 
           broadcastToScene(
             oldScene,
@@ -453,7 +455,12 @@ export function attachWebSocketServer(httpServer: Server) {
 
           // Move into the new scene at its own saved position. If there's no
           // saved position yet, tell the client to use the scene's spawn point.
-          const saved = await loadSceneState(leaving.userId, newScene);
+          // Re-entering the same scene skips the DB read — the in-memory
+          // position is already the latest.
+          const saved: Pick<PlayerStateRow, "pos_x" | "pos_y" | "direction"> | null =
+            oldScene === newScene
+              ? { pos_x: leaving.posX, pos_y: leaving.posY, direction: leaving.direction }
+              : await loadSceneState(leaving.userId, newScene);
           leaving.scene = newScene;
           let spawnAtDefault = false;
           if (saved) {
