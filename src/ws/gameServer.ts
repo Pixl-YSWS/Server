@@ -1,7 +1,7 @@
 import { WebSocketServer, WebSocket } from "ws";
 import type { Server } from "http";
 import { verifySessionToken } from "../auth/session.js";
-import { censorChat } from "../moderation.js";
+import { activeBan, censorChat, logViolation } from "../moderation.js";
 import { supabase, type PlayerStateRow } from "../db/client.js";
 import {
   type Lobby,
@@ -255,6 +255,16 @@ export function attachWebSocketServer(httpServer: Server) {
     let player: ConnectedPlayer | null = null;
 
     (async () => {
+      const ban = await activeBan(session.userId);
+      if (ban) {
+        const until = ban.expires_at
+          ? `until ${new Date(ban.expires_at).toUTCString()}`
+          : "permanently";
+        console.log("Connection rejected: banned", session.userId, until);
+        ws.close(4003, `Banned ${until}`.slice(0, 120));
+        return;
+      }
+
       // Default to the player's most recently active scene/position.
       const { data: stateRows, error } = await supabase
         .from("player_state")
@@ -543,12 +553,12 @@ export function attachWebSocketServer(httpServer: Server) {
       }
 
       if (msg.type === "chat") {
-        const text = censorChat(
-          String(msg.text ?? "")
-            .replace(/\s+/g, " ")
-            .trim()
-            .slice(0, 200),
-        );
+        const raw = String(msg.text ?? "")
+          .replace(/\s+/g, " ")
+          .trim()
+          .slice(0, 200);
+        const text = censorChat(raw);
+        if (text !== raw) logViolation(player.userId, "chat", raw);
         if (!text) return;
 
         broadcastToScene(player.scene, {

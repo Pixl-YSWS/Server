@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { issueSessionToken, verifySessionToken } from "../auth/session.js";
-import { containsBlocked } from "../moderation.js";
+import { containsBlocked, logViolation } from "../moderation.js";
 import { supabase } from "../db/client.js";
 
 const router = Router();
@@ -25,7 +25,10 @@ router.post("/api/profile/name", async (req, res) => {
   const raw = typeof req.body?.name === "string" ? req.body.name : "";
   const name = raw.trim().replace(/\s+/g, " ");
   const problem = nameProblem(name);
-  if (problem) return res.json({ ok: false, reason: problem });
+  if (problem) {
+    if (containsBlocked(name)) logViolation(session.userId, "name", name);
+    return res.json({ ok: false, reason: problem });
+  }
 
   const { error } = await supabase
     .from("users")

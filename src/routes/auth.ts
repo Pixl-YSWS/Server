@@ -2,6 +2,7 @@ import { Router } from "express";
 import crypto from "crypto";
 import { supabase, type UserRow } from "../db/client.js";
 import { issueSessionToken } from "../auth/session.js";
+import { activeBan } from "../moderation.js";
 
 const router = Router();
 
@@ -194,6 +195,15 @@ router.get("/auth/hackclub/callback", async (req, res) => {
     const existing = existingUsers[0] as UserRow;
     userId = existing.id;
     displayName = existing.display_name;
+    if (identity.slack_id) {
+      void supabase
+        .from("users")
+        .update({ slack_id: identity.slack_id })
+        .eq("id", userId)
+        .then(({ error: e }) => {
+          if (e) console.error("Failed to store slack_id", e);
+        });
+    }
   } else {
     isNewUser = true;
     const { data: created, error: insertError } = await supabase
@@ -203,6 +213,7 @@ router.get("/auth/hackclub/callback", async (req, res) => {
         oauth_id: identity.id,
         display_name: displayNameFromHca,
         avatar_url: null,
+        slack_id: identity.slack_id ?? null,
       })
       .select()
       .single();
@@ -223,6 +234,21 @@ router.get("/auth/hackclub/callback", async (req, res) => {
     if (stateError) {
       console.error("Failed to seed player_state", stateError);
     }
+  }
+
+  const ban = await activeBan(userId);
+  if (ban) {
+    const until = ban.expires_at
+      ? `until ${new Date(ban.expires_at).toUTCString()}`
+      : "permanently";
+    const reason = ban.reason
+      ? `<p>${ban.reason.replace(/</g, "&lt;")}</p>`
+      : "";
+    return res
+      .status(403)
+      .send(
+        `<html><body style="font-family:sans-serif;text-align:center;margin-top:4rem;"><h2>You're banned ${until}.</h2>${reason}</body></html>`,
+      );
   }
 
   const sessionToken = issueSessionToken({ userId, displayName });
