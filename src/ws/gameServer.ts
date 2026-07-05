@@ -228,10 +228,38 @@ async function persistNpcs(
   if (error) console.error("Failed to persist npc_state", error);
 }
 
+const BAN_SWEEP_MS = 30_000;
+
+// Dashboard bans land directly in the bans table, so poll it to kick
+// players who are banned while already connected.
+async function sweepBans() {
+  if (players.size === 0) return;
+  const { data, error } = await supabase
+    .from("bans")
+    .select("user_id, expires_at")
+    .in("user_id", [...players.keys()])
+    .is("lifted_at", null)
+    .or(`expires_at.is.null,expires_at.gt.${new Date().toISOString()}`);
+  if (error) {
+    console.error("Failed to sweep bans", error);
+    return;
+  }
+  for (const row of data ?? []) {
+    const p = players.get(row.user_id as string);
+    if (!p) continue;
+    const until = row.expires_at
+      ? `until ${new Date(row.expires_at as string).toUTCString()}`
+      : "permanently";
+    console.log("Kicking banned player", p.userId, until);
+    p.ws.close(4003, `Banned ${until}`.slice(0, 120));
+  }
+}
+
 export function attachWebSocketServer(httpServer: Server) {
   const wss = new WebSocketServer({ server: httpServer, path: "/ws" });
 
   void loadLobbies();
+  setInterval(() => void sweepBans(), BAN_SWEEP_MS);
 
   wss.on("connection", (ws, req) => {
     console.log("New WS connection attempt from", req.socket.remoteAddress);
