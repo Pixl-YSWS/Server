@@ -173,6 +173,33 @@ router.post("/api/friends/remove", async (req, res) => {
   res.json({ ok: true });
 });
 
+router.get("/api/players/search", async (req, res) => {
+  const token = typeof req.query.token === "string" ? req.query.token : "";
+  const session = token ? verifySessionToken(token) : null;
+  if (!session) return res.status(401).json({ ok: false });
+
+  const q = (typeof req.query.q === "string" ? req.query.q : "").trim();
+  if (q.length < 2)
+    return res.json({ ok: true, players: [] });
+
+  const { data, error } = await supabase
+    .from("users")
+    .select("id, display_name")
+    .ilike("display_name", `%${q.replace(/[%_]/g, "")}%`)
+    .neq("id", session.userId)
+    .limit(10);
+  if (error) {
+    console.error("[friends] search failed", error);
+    return res.status(500).json({ ok: false });
+  }
+  const players = (data ?? []).map((u) => ({
+    userId: u.id as string,
+    name: u.display_name as string,
+    online: presenceFor(u.id as string).online,
+  }));
+  res.json({ ok: true, players });
+});
+
 router.get("/api/players/profile", async (req, res) => {
   const token = typeof req.query.token === "string" ? req.query.token : "";
   const session = token ? verifySessionToken(token) : null;
