@@ -2,6 +2,7 @@ import { WebSocketServer, WebSocket } from "ws";
 import type { Server } from "http";
 import { verifySessionToken } from "../auth/session.js";
 import { activeBan, censorChat, logViolation } from "../moderation.js";
+import { areFriends } from "../social.js";
 import { supabase, type PlayerStateRow } from "../db/client.js";
 import {
   type Lobby,
@@ -226,6 +227,24 @@ async function persistNpcs(
     .from("npc_state")
     .upsert(rows, { onConflict: "user_id,scene,npc_id" });
   if (error) console.error("Failed to persist npc_state", error);
+}
+
+// Presence snapshot for the HTTP routes (friends list, profiles). Lobby id is
+// only exposed for players currently inside a lobby scene.
+export function presenceFor(userId: string): {
+  online: boolean;
+  lobbyId: string;
+  lobbyName: string;
+} {
+  const p = players.get(userId);
+  if (!p) return { online: false, lobbyId: "", lobbyName: "" };
+  const lid = lobbyIdFromScene(p.scene);
+  const lobby = lid ? lobbies.get(lid) : undefined;
+  return {
+    online: true,
+    lobbyId: lobby ? lobby.id : "",
+    lobbyName: lobby ? lobby.name : "",
+  };
 }
 
 const BAN_SWEEP_MS = 30_000;
@@ -595,6 +614,79 @@ export function attachWebSocketServer(httpServer: Server) {
           displayName: player.displayName,
           text,
         });
+      }
+
+      if (msg.type === "dm") {
+        const targetName = String(msg.to ?? "").trim();
+        const raw = String(msg.text ?? "")
+          .replace(/\s+/g, " ")
+          .trim()
+          .slice(0, 200);
+        if (!targetName || !raw) return;
+        const text = censorChat(raw);
+        if (text !== raw) logViolation(player.userId, "chat", raw);
+
+        let target: ConnectedPlayer | undefined;
+        for (const p of players.values()) {
+          if (p.displayName.toLowerCase() === targetName.toLowerCase()) {
+            target = p;
+            break;
+          }
+        }
+        if (!target) {
+          ws.send(
+            JSON.stringify({
+              type: "dm_error",
+              reason: `${targetName} isn't online.`,
+            }),
+          );
+          return;
+        }
+        if (target.userId === player.userId) {
+          ws.send(
+            JSON.stringify({
+              type: "dm_error",
+              reason: "You can't whisper to yourself.",
+            }),
+          );
+          return;
+        }
+        const frame = JSON.stringify({
+          type: "dm",
+          fromId: player.userId,
+          fromName: player.displayName,
+          toId: target.userId,
+          toName: target.displayName,
+          text,
+        });
+        if (target.ws.readyState === WebSocket.OPEN) target.ws.send(frame);
+        ws.send(frame);
+      }
+
+      if (msg.type === "lobby_join_friend") {
+        const friendId = String(msg.userId ?? "");
+        const asking = player;
+        void (async () => {
+          const friend = players.get(friendId);
+          const lid = friend ? lobbyIdFromScene(friend.scene) : null;
+          const lobby = lid ? lobbies.get(lid) : undefined;
+          const deny = (reason: string) =>
+            ws.send(JSON.stringify({ type: "lobby_denied", reason }));
+          if (!friend) return deny("That friend isn't online right now.");
+          if (!lid || !lobby)
+            return deny("Your friend isn't in a lobby right now.");
+          if (!(await areFriends(asking.userId, friendId)))
+            return deny("You can only join lobbies of your friends.");
+          if (lobbyMemberCount(lid, asking.userId) >= lobby.capacity)
+            return deny("That lobby is full.");
+          asking.lobbyGrant = lid;
+          ws.send(
+            JSON.stringify({
+              type: "lobby_joined",
+              lobby: lobbyInfoFor(lobby, lobbyMemberCount(lid), asking.userId),
+            }),
+          );
+        })().catch(console.error);
       }
 
       if (msg.type === "emote") {

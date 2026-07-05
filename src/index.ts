@@ -6,6 +6,7 @@ import hackatimeRouter from "./routes/hackatime.js";
 import projectsRouter from "./routes/projects.js";
 import notificationsRouter from "./routes/notifications.js";
 import profileRouter from "./routes/profile.js";
+import friendsRouter from "./routes/friends.js";
 import { attachWebSocketServer } from "./ws/gameServer.js";
 
 const app = express();
@@ -31,6 +32,7 @@ app.use(hackatimeRouter);
 app.use(projectsRouter);
 app.use(notificationsRouter);
 app.use(profileRouter);
+app.use(friendsRouter);
 
 app.get("/", (_req, res) => res.json({ name: "pixl-server", status: "ok" }));
 app.get("/health", (_req, res) => res.json({ ok: true }));
