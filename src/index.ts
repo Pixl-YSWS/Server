@@ -7,6 +7,8 @@ import projectsRouter from "./routes/projects.js";
 import notificationsRouter from "./routes/notifications.js";
 import profileRouter from "./routes/profile.js";
 import friendsRouter from "./routes/friends.js";
+import uploadsRouter from "./routes/uploads.js";
+import exploreRouter from "./routes/explore.js";
 import { attachWebSocketServer } from "./ws/gameServer.js";
 
 const app = express();
@@ -33,6 +35,8 @@ app.use(projectsRouter);
 app.use(notificationsRouter);
 app.use(profileRouter);
 app.use(friendsRouter);
+app.use(uploadsRouter);
+app.use(exploreRouter);
 
 app.get("/", (_req, res) => res.json({ name: "pixl-server", status: "ok" }));
 app.get("/health", (_req, res) => res.json({ ok: true }));
