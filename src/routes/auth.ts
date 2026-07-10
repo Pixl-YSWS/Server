@@ -238,16 +238,16 @@ router.get("/auth/hackclub/callback", async (req, res) => {
 
   const ban = await activeBan(userId);
   if (ban) {
-    const until = ban.expires_at
-      ? `until ${new Date(ban.expires_at).toUTCString()}`
-      : "permanently";
+    const heading = ban.expires_at
+      ? `You've been temporarily banned from Pixl until ${new Date(ban.expires_at).toUTCString()}.`
+      : "You've been permanently banned from Pixl.";
     const reason = ban.reason
-      ? `<p>${ban.reason.replace(/</g, "&lt;")}</p>`
+      ? `<p>Reason: ${ban.reason.replace(/</g, "&lt;")}</p>`
       : "";
     return res
       .status(403)
       .send(
-        `<html><body style="font-family:sans-serif;text-align:center;margin-top:4rem;"><h2>You're banned ${until}.</h2>${reason}</body></html>`,
+        `<html><body style="font-family:sans-serif;text-align:center;margin-top:4rem;"><h2>${heading}</h2>${reason}<p>If you believe this is a mistake, reach out to the Pixl team.</p></body></html>`,
       );
   }
 

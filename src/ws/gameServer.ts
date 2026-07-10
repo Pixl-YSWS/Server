@@ -266,11 +266,11 @@ async function sweepBans() {
   for (const row of data ?? []) {
     const p = players.get(row.user_id as string);
     if (!p) continue;
-    const until = row.expires_at
-      ? `until ${new Date(row.expires_at as string).toUTCString()}`
-      : "permanently";
-    console.log("Kicking banned player", p.userId, until);
-    p.ws.close(4003, `Banned ${until}`.slice(0, 120));
+    const message = row.expires_at
+      ? `You've been temporarily banned from Pixl until ${new Date(row.expires_at as string).toUTCString()}.`
+      : "You've been permanently banned from Pixl.";
+    console.log("Kicking banned player", p.userId, message);
+    p.ws.close(4003, message.slice(0, 120));
   }
 }
 
@@ -304,11 +304,11 @@ export function attachWebSocketServer(httpServer: Server) {
     (async () => {
       const ban = await activeBan(session.userId);
       if (ban) {
-        const until = ban.expires_at
-          ? `until ${new Date(ban.expires_at).toUTCString()}`
-          : "permanently";
-        console.log("Connection rejected: banned", session.userId, until);
-        ws.close(4003, `Banned ${until}`.slice(0, 120));
+        const message = ban.expires_at
+          ? `You've been temporarily banned from Pixl until ${new Date(ban.expires_at).toUTCString()}.`
+          : "You've been permanently banned from Pixl.";
+        console.log("Connection rejected: banned", session.userId, message);
+        ws.close(4003, message.slice(0, 120));
         return;
       }
 
