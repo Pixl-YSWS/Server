@@ -115,6 +115,97 @@ router.put("/api/projects/:id", async (req, res) => {
   res.json({ ok: true, project: data });
 });
 
+async function ownsProject(userId: string, projectId: number): Promise<boolean> {
+  const { data, error } = await supabase
+    .from("projects")
+    .select("id")
+    .eq("id", projectId)
+    .eq("user_id", userId)
+    .maybeSingle();
+  if (error) {
+    console.error("[projects] ownership check failed", error);
+    return false;
+  }
+  return data !== null;
+}
+
+// List journal entries for one of the user's own projects, newest first.
+router.get("/api/projects/:id/journal", async (req, res) => {
+  const token = typeof req.query.token === "string" ? req.query.token : "";
+  const session = token ? verifySessionToken(token) : null;
+  if (!session) return res.status(401).json({ ok: false });
+
+  const id = Number(req.params.id);
+  if (!Number.isFinite(id)) return res.status(400).json({ ok: false });
+  if (!(await ownsProject(session.userId, id)))
+    return res.status(404).json({ ok: false });
+
+  const { data, error } = await supabase
+    .from("project_journals")
+    .select("*")
+    .eq("project_id", id)
+    .order("created_at", { ascending: false });
+  if (error) {
+    console.error("[projects] journal list failed", error);
+    return res.status(500).json({ ok: false });
+  }
+  res.json({ ok: true, entries: data ?? [] });
+});
+
+// Add a journal entry (markdown content + optional hours) to an own project.
+router.post("/api/projects/:id/journal", async (req, res) => {
+  const token = typeof req.query.token === "string" ? req.query.token : "";
+  const session = token ? verifySessionToken(token) : null;
+  if (!session) return res.status(401).json({ ok: false });
+
+  const id = Number(req.params.id);
+  if (!Number.isFinite(id)) return res.status(400).json({ ok: false });
+  if (!(await ownsProject(session.userId, id)))
+    return res.status(404).json({ ok: false });
+
+  const content = String(req.body?.content ?? "").trim().slice(0, 5000);
+  if (!content)
+    return res.status(400).json({ ok: false, error: "content_required" });
+  let hours = Number(req.body?.hours ?? 0);
+  if (!Number.isFinite(hours) || hours < 0) hours = 0;
+  hours = Math.min(Math.round(hours * 100) / 100, 100);
+
+  const { data, error } = await supabase
+    .from("project_journals")
+    .insert({ project_id: id, user_id: session.userId, content, hours })
+    .select()
+    .single();
+  if (error) {
+    console.error("[projects] journal create failed", error);
+    return res.status(500).json({ ok: false });
+  }
+  res.json({ ok: true, entry: data });
+});
+
+// Delete one of the user's own journal entries.
+router.delete("/api/projects/:id/journal/:entryId", async (req, res) => {
+  const token = typeof req.query.token === "string" ? req.query.token : "";
+  const session = token ? verifySessionToken(token) : null;
+  if (!session) return res.status(401).json({ ok: false });
+
+  const id = Number(req.params.id);
+  const entryId = Number(req.params.entryId);
+  if (!Number.isFinite(id) || !Number.isFinite(entryId))
+    return res.status(400).json({ ok: false });
+
+  const { error } = await supabase
+    .from("project_journals")
+    .delete()
+    .eq("id", entryId)
+    .eq("project_id", id)
+    .eq("user_id", session.userId);
+  if (error) {
+    console.error("[projects] journal delete failed", error);
+    return res.status(500).json({ ok: false });
+  }
+  res.json({ ok: true });
+});
+
 // Delete one of the user's own projects.
 router.delete("/api/projects/:id", async (req, res) => {
   const token = typeof req.query.token === "string" ? req.query.token : "";
