@@ -35,11 +35,14 @@ function isGithubRepoUrl(url: string): boolean {
   return u.pathname.split("/").filter(Boolean).length >= 2;
 }
 
+export const PROJECT_TYPES = ["game", "website", "app", "cli", "hardware", "other"] as const;
+
 interface ProjectFields {
   name: string;
   description: string;
   repo_url: string;
   demo_url: string;
+  type: string;
   hackatime_projects: string[];
 }
 
@@ -52,12 +55,14 @@ function parseProjectBody(
   if (!name) return { error: "name_required" };
   const repoUrl = String(body?.repoUrl ?? "").trim().slice(0, 500);
   if (repoUrl && !isGithubRepoUrl(repoUrl)) return { error: "repo_not_github" };
+  const type = String(body?.type ?? "other").trim();
   return {
     fields: {
       name,
       description: String(body?.description ?? "").trim().slice(0, 2000),
       repo_url: repoUrl,
       demo_url: String(body?.demoUrl ?? "").trim().slice(0, 500),
+      type: (PROJECT_TYPES as readonly string[]).includes(type) ? type : "other",
       hackatime_projects: Array.isArray(body?.hackatimeProjects)
         ? body.hackatimeProjects.map((p: unknown) => String(p)).slice(0, 50)
         : [],
@@ -112,6 +117,47 @@ router.put("/api/projects/:id", async (req, res) => {
     console.error("[projects] update failed", error);
     return res.status(500).json({ ok: false });
   }
+  res.json({ ok: true, project: data });
+});
+
+// Ship a project for review: draft/needs_changes -> shipped. Requires a repo link.
+router.post("/api/projects/:id/ship", async (req, res) => {
+  const token = typeof req.query.token === "string" ? req.query.token : "";
+  const session = token ? verifySessionToken(token) : null;
+  if (!session) return res.status(401).json({ ok: false });
+
+  const id = Number(req.params.id);
+  if (!Number.isFinite(id)) return res.status(400).json({ ok: false });
+
+  const { data: project, error } = await supabase
+    .from("projects")
+    .select("id, name, status, repo_url")
+    .eq("id", id)
+    .eq("user_id", session.userId)
+    .maybeSingle();
+  if (error || !project) return res.status(404).json({ ok: false });
+
+  if (project.status !== "draft" && project.status !== "needs_changes")
+    return res.status(400).json({ ok: false, error: "already_shipped" });
+  if (!project.repo_url)
+    return res.status(400).json({ ok: false, error: "repo_required" });
+
+  const { data, error: updateError } = await supabase
+    .from("projects")
+    .update({ status: "shipped", shipped_at: new Date().toISOString(), review_note: "" })
+    .eq("id", id)
+    .eq("user_id", session.userId)
+    .select()
+    .single();
+  if (updateError) {
+    console.error("[projects] ship failed", updateError);
+    return res.status(500).json({ ok: false });
+  }
+  void addNotification(
+    session.userId,
+    "Project shipped",
+    `"${project.name}" is in the review queue. You'll hear back here once it's reviewed.`,
+  );
   res.json({ ok: true, project: data });
 });
 
