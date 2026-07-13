@@ -43,6 +43,40 @@ router.get("/api/explore/players", async (req, res) => {
   });
 });
 
+router.get("/api/explore/showcase", async (req, res) => {
+  const token = typeof req.query.token === "string" ? req.query.token : "";
+  const session = token ? verifySessionToken(token) : null;
+  if (!session) return res.status(401).json({ ok: false });
+
+  const { data: projects, error } = await supabase
+    .from("projects")
+    .select("*")
+    .order("created_at", { ascending: false })
+    .limit(4);
+  if (error) {
+    console.error("[explore] showcase failed", error);
+    return res.status(500).json({ ok: false });
+  }
+
+  const ids = [...new Set((projects ?? []).map((p) => p.user_id as string))];
+  const names = new Map<string, string>();
+  if (ids.length > 0) {
+    const { data: users } = await supabase
+      .from("users")
+      .select("id, display_name")
+      .in("id", ids);
+    for (const u of users ?? []) names.set(u.id as string, u.display_name as string);
+  }
+
+  res.json({
+    ok: true,
+    projects: (projects ?? []).map((p) => ({
+      ...p,
+      owner_name: names.get(p.user_id as string) ?? "?",
+    })),
+  });
+});
+
 router.get("/api/explore/players/:id", async (req, res) => {
   const token = typeof req.query.token === "string" ? req.query.token : "";
   const session = token ? verifySessionToken(token) : null;

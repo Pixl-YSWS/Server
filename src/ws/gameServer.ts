@@ -30,7 +30,7 @@ interface ConnectedPlayer {
   lobbyGrant: string;
 }
 
-const SKIN_RE = /^(cvc:[1-9]|cv1:b[1-3]h[0-6]t[1-6]o[1-6])$/;
+const SKIN_RE = /^(cvc:[1-9]|cv1:b[1-3]h(\d|1[0-8])t([1-9]|1[0-8])o([1-9]|1[0-8]))$/;
 
 const EMOTE_KEYS = new Set([
   "happy", "laugh", "heart", "sad", "angry", "love", "cry", "idea",
