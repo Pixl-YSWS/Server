@@ -131,7 +131,7 @@ router.post("/api/projects/:id/ship", async (req, res) => {
 
   const { data: project, error } = await supabase
     .from("projects")
-    .select("id, name, status, repo_url")
+    .select("id, name, status, repo_url, demo_url")
     .eq("id", id)
     .eq("user_id", session.userId)
     .maybeSingle();
@@ -141,6 +141,8 @@ router.post("/api/projects/:id/ship", async (req, res) => {
     return res.status(400).json({ ok: false, error: "already_shipped" });
   if (!project.repo_url)
     return res.status(400).json({ ok: false, error: "repo_required" });
+  if (!project.demo_url)
+    return res.status(400).json({ ok: false, error: "demo_required" });
 
   const { data, error: updateError } = await supabase
     .from("projects")
