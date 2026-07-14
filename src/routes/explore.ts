@@ -29,6 +29,8 @@ router.get("/api/explore/players", async (req, res) => {
     const { data: projects } = await supabase
       .from("projects")
       .select("user_id")
+      .is("archived_at", null)
+      .is("rejected_at", null)
       .in("user_id", ids);
     for (const p of projects ?? [])
       counts.set(p.user_id as string, (counts.get(p.user_id as string) ?? 0) + 1);
@@ -51,6 +53,8 @@ router.get("/api/explore/showcase", async (req, res) => {
   const { data: projects, error } = await supabase
     .from("projects")
     .select("*")
+    .is("archived_at", null)
+    .is("rejected_at", null)
     .order("created_at", { ascending: false })
     .limit(4);
   if (error) {
@@ -85,7 +89,13 @@ router.get("/api/explore/players/:id", async (req, res) => {
   const id = String(req.params.id);
   const [user, projects] = await Promise.all([
     supabase.from("users").select("id, display_name, skin, created_at").eq("id", id).maybeSingle(),
-    supabase.from("projects").select("*").eq("user_id", id).order("created_at", { ascending: false }),
+    supabase
+      .from("projects")
+      .select("*")
+      .eq("user_id", id)
+      .is("archived_at", null)
+      .is("rejected_at", null)
+      .order("created_at", { ascending: false }),
   ]);
   if (user.error || !user.data) return res.status(404).json({ ok: false });
 
@@ -102,6 +112,8 @@ router.get("/api/explore/projects", async (req, res) => {
   let query = supabase
     .from("projects")
     .select("*")
+    .is("archived_at", null)
+    .is("rejected_at", null)
     .order("created_at", { ascending: false })
     .limit(100);
   if (q) query = query.ilike("name", `%${q}%`);
@@ -142,6 +154,8 @@ router.get("/api/explore/projects/:id", async (req, res) => {
     .from("projects")
     .select("*")
     .eq("id", id)
+    .is("archived_at", null)
+    .is("rejected_at", null)
     .maybeSingle();
   if (error || !project) return res.status(404).json({ ok: false });
 
