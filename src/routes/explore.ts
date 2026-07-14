@@ -92,20 +92,18 @@ router.get("/api/explore/players/:id", async (req, res) => {
   res.json({ ok: true, player: user.data, projects: projects.data ?? [] });
 });
 
-// Browse everyone's projects, newest first, with optional type/search filters.
+// Browse everyone's projects, newest first, with an optional search filter.
 router.get("/api/explore/projects", async (req, res) => {
   const token = typeof req.query.token === "string" ? req.query.token : "";
   const session = token ? verifySessionToken(token) : null;
   if (!session) return res.status(401).json({ ok: false });
 
-  const type = typeof req.query.type === "string" ? req.query.type.trim() : "";
   const q = typeof req.query.q === "string" ? req.query.q.trim() : "";
   let query = supabase
     .from("projects")
     .select("*")
     .order("created_at", { ascending: false })
     .limit(100);
-  if (type) query = query.eq("type", type);
   if (q) query = query.ilike("name", `%${q}%`);
   const { data: projects, error } = await query;
   if (error) {

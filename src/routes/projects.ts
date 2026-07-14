@@ -35,14 +35,11 @@ function isGithubRepoUrl(url: string): boolean {
   return u.pathname.split("/").filter(Boolean).length >= 2;
 }
 
-export const PROJECT_TYPES = ["game", "website", "app", "cli", "hardware", "other"] as const;
-
 interface ProjectFields {
   name: string;
   description: string;
   repo_url: string;
   demo_url: string;
-  type: string;
   hackatime_projects: string[];
 }
 
@@ -55,14 +52,12 @@ function parseProjectBody(
   if (!name) return { error: "name_required" };
   const repoUrl = String(body?.repoUrl ?? "").trim().slice(0, 500);
   if (repoUrl && !isGithubRepoUrl(repoUrl)) return { error: "repo_not_github" };
-  const type = String(body?.type ?? "other").trim();
   return {
     fields: {
       name,
       description: String(body?.description ?? "").trim().slice(0, 2000),
       repo_url: repoUrl,
       demo_url: String(body?.demoUrl ?? "").trim().slice(0, 500),
-      type: (PROJECT_TYPES as readonly string[]).includes(type) ? type : "other",
       hackatime_projects: Array.isArray(body?.hackatimeProjects)
         ? body.hackatimeProjects.map((p: unknown) => String(p)).slice(0, 50)
         : [],
