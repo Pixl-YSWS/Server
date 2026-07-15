@@ -158,11 +158,14 @@ router.post("/api/projects/:id/ship", async (req, res) => {
 
   const { data: project, error } = await supabase
     .from("projects")
-    .select("id, name, status, repo_url, demo_url, image_url, hackatime_projects, rejected_at")
+    .select("id, name, status, repo_url, demo_url, image_url, hackatime_projects, rejected_at, banned_at")
     .eq("id", id)
     .eq("user_id", session.userId)
     .maybeSingle();
   if (error || !project) return res.status(404).json({ ok: false });
+
+  if (project.banned_at)
+    return res.status(400).json({ ok: false, error: "project_banned" });
 
   const shippable = ["draft", "needs_changes", "approved"];
   if (!shippable.includes(project.status as string) && !project.rejected_at)

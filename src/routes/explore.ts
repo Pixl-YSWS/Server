@@ -31,6 +31,7 @@ router.get("/api/explore/players", async (req, res) => {
       .select("user_id")
       .is("archived_at", null)
       .is("rejected_at", null)
+    .is("banned_at", null)
       .in("user_id", ids);
     for (const p of projects ?? [])
       counts.set(p.user_id as string, (counts.get(p.user_id as string) ?? 0) + 1);
@@ -55,6 +56,7 @@ router.get("/api/explore/showcase", async (req, res) => {
     .select("*")
     .is("archived_at", null)
     .is("rejected_at", null)
+    .is("banned_at", null)
     .order("created_at", { ascending: false })
     .limit(4);
   if (error) {
@@ -95,6 +97,7 @@ router.get("/api/explore/players/:id", async (req, res) => {
       .eq("user_id", id)
       .is("archived_at", null)
       .is("rejected_at", null)
+    .is("banned_at", null)
       .order("created_at", { ascending: false }),
   ]);
   if (user.error || !user.data) return res.status(404).json({ ok: false });
@@ -114,6 +117,7 @@ router.get("/api/explore/projects", async (req, res) => {
     .select("*")
     .is("archived_at", null)
     .is("rejected_at", null)
+    .is("banned_at", null)
     .order("created_at", { ascending: false })
     .limit(100);
   if (q) query = query.ilike("name", `%${q}%`);
@@ -156,6 +160,7 @@ router.get("/api/explore/projects/:id", async (req, res) => {
     .eq("id", id)
     .is("archived_at", null)
     .is("rejected_at", null)
+    .is("banned_at", null)
     .maybeSingle();
   if (error || !project) return res.status(404).json({ ok: false });
 
