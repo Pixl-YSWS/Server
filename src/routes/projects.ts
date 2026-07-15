@@ -158,14 +158,14 @@ router.post("/api/projects/:id/ship", async (req, res) => {
 
   const { data: project, error } = await supabase
     .from("projects")
-    .select("id, name, status, repo_url, demo_url, image_url, hackatime_projects")
+    .select("id, name, status, repo_url, demo_url, image_url, hackatime_projects, rejected_at")
     .eq("id", id)
     .eq("user_id", session.userId)
     .maybeSingle();
   if (error || !project) return res.status(404).json({ ok: false });
 
   const shippable = ["draft", "needs_changes", "approved"];
-  if (!shippable.includes(project.status as string))
+  if (!shippable.includes(project.status as string) && !project.rejected_at)
     return res.status(400).json({ ok: false, error: "already_shipped" });
   if (!project.repo_url)
     return res.status(400).json({ ok: false, error: "repo_required" });
@@ -198,7 +198,7 @@ router.post("/api/projects/:id/ship", async (req, res) => {
   if (trackedSeconds < 3600)
     return res.status(400).json({ ok: false, error: "hackatime_hours_required" });
 
-  const isUpdate = project.status === "approved";
+  const isUpdate = project.status === "approved" && !project.rejected_at;
   const updateNotes = String(req.body?.updateNotes ?? "").trim().slice(0, 2000);
   if (isUpdate && !updateNotes)
     return res.status(400).json({ ok: false, error: "update_notes_required" });
@@ -226,6 +226,10 @@ router.post("/api/projects/:id/ship", async (req, res) => {
       status: "shipped",
       shipped_at: new Date().toISOString(),
       review_note: "",
+      rejected_at: null,
+      reject_reason: "",
+      reject_by: "",
+      hackatime_seconds: trackedSeconds,
       is_update: isUpdate,
       update_notes: isUpdate ? updateNotes : "",
       other_ysws: otherYsws,
