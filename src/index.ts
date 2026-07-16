@@ -9,6 +9,7 @@ import profileRouter from "./routes/profile.js";
 import friendsRouter from "./routes/friends.js";
 import uploadsRouter from "./routes/uploads.js";
 import exploreRouter from "./routes/explore.js";
+import { rateLimit } from "./rateLimit.js";
 import { attachWebSocketServer } from "./ws/gameServer.js";
 
 const app = express();
@@ -27,6 +28,12 @@ app.use((req, res, next) => {
   }
   next();
 });
+
+app.use(rateLimit({ windowMs: 60_000, max: 300, name: "all" }));
+const writeLimiter = rateLimit({ windowMs: 60_000, max: 60, name: "write" });
+app.use((req, res, next) =>
+  req.method === "GET" ? next() : writeLimiter(req, res, next),
+);
 
 app.use(express.json());
 app.use(authRouter);

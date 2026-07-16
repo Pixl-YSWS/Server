@@ -46,6 +46,53 @@ router.get("/api/explore/players", async (req, res) => {
   });
 });
 
+// Top pixel balances for the in-game leaderboard. Read-only; balances are
+// server-authoritative so this can't be gamed from the client.
+router.get("/api/explore/leaderboard", async (req, res) => {
+  const token = typeof req.query.token === "string" ? req.query.token : "";
+  const session = token ? verifySessionToken(token) : null;
+  if (!session) return res.status(401).json({ ok: false });
+
+  const { data, error } = await supabase
+    .from("users")
+    .select("id, display_name, skin, pixels")
+    .gt("pixels", 0)
+    .order("pixels", { ascending: false })
+    .limit(25);
+  if (error) {
+    console.error("[explore] leaderboard failed", error);
+    return res.status(500).json({ ok: false });
+  }
+  const players = (data ?? []).map((u, i) => ({
+    rank: i + 1,
+    id: u.id,
+    display_name: u.display_name,
+    skin: u.skin,
+    pixels: Math.round(Number(u.pixels) || 0),
+    you: u.id === session.userId,
+  }));
+
+  let yourRank = players.find((p) => p.you)?.rank ?? 0;
+  let yourPixels = players.find((p) => p.you)?.pixels ?? -1;
+  if (yourPixels < 0) {
+    const { data: me } = await supabase
+      .from("users")
+      .select("pixels")
+      .eq("id", session.userId)
+      .single();
+    yourPixels = Math.round(Number(me?.pixels) || 0);
+    if (yourPixels > 0) {
+      const { count } = await supabase
+        .from("users")
+        .select("id", { count: "exact", head: true })
+        .gt("pixels", yourPixels);
+      yourRank = (count ?? 0) + 1;
+    }
+  }
+
+  res.json({ ok: true, players, yourRank, yourPixels });
+});
+
 router.get("/api/explore/showcase", async (req, res) => {
   const token = typeof req.query.token === "string" ? req.query.token : "";
   const session = token ? verifySessionToken(token) : null;

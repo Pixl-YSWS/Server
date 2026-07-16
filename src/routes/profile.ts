@@ -75,4 +75,44 @@ router.get("/api/profile/wallet", async (req, res) => {
   res.json({ ok: true, pixels, approvedHours });
 });
 
+// The player's own pixel ledger, newest first, with project names attached.
+router.get("/api/profile/transactions", async (req, res) => {
+  const token = typeof req.query.token === "string" ? req.query.token : "";
+  const session = token ? verifySessionToken(token) : null;
+  if (!session) return res.status(401).json({ ok: false });
+
+  const { data, error } = await supabase
+    .from("pixel_transactions")
+    .select("id, project_id, amount, hours, reason, created_at")
+    .eq("user_id", session.userId)
+    .order("created_at", { ascending: false })
+    .limit(50);
+  if (error) {
+    console.error("[profile] transactions failed", error);
+    return res.status(500).json({ ok: false });
+  }
+  const rows = data ?? [];
+  const projectIds = [
+    ...new Set(rows.map((t) => t.project_id).filter((x): x is number => x != null)),
+  ];
+  const names = new Map<number, string>();
+  if (projectIds.length > 0) {
+    const { data: projects } = await supabase
+      .from("projects")
+      .select("id, name")
+      .in("id", projectIds);
+    for (const p of projects ?? []) names.set(p.id as number, p.name as string);
+  }
+  res.json({
+    ok: true,
+    transactions: rows.map((t) => ({
+      id: t.id,
+      amount: Math.round(Number(t.amount) || 0),
+      reason: t.reason,
+      project: t.project_id != null ? (names.get(t.project_id as number) ?? "") : "",
+      created_at: t.created_at,
+    })),
+  });
+});
+
 export default router;
