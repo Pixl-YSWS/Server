@@ -195,13 +195,16 @@ router.get("/auth/hackclub/callback", async (req, res) => {
     const existing = existingUsers[0] as UserRow;
     userId = existing.id;
     displayName = existing.display_name;
-    if (identity.slack_id) {
+    const patch: Record<string, string> = {};
+    if (identity.slack_id) patch.slack_id = identity.slack_id;
+    if (identity.primary_email) patch.email = identity.primary_email;
+    if (Object.keys(patch).length > 0) {
       void supabase
         .from("users")
-        .update({ slack_id: identity.slack_id })
+        .update(patch)
         .eq("id", userId)
         .then(({ error: e }) => {
-          if (e) console.error("Failed to store slack_id", e);
+          if (e) console.error("Failed to backfill slack_id/email", e);
         });
     }
   } else {
@@ -214,6 +217,7 @@ router.get("/auth/hackclub/callback", async (req, res) => {
         display_name: displayNameFromHca,
         avatar_url: null,
         slack_id: identity.slack_id ?? null,
+        email: identity.primary_email ?? null,
       })
       .select()
       .single();
