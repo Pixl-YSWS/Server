@@ -174,6 +174,8 @@ router.post("/api/projects/:id/ship", async (req, res) => {
     return res.status(400).json({ ok: false, error: "repo_required" });
   if (!project.demo_url)
     return res.status(400).json({ ok: false, error: "demo_required" });
+  if (!String(project.image_url ?? "").trim())
+    return res.status(400).json({ ok: false, error: "image_required" });
 
   const [repoAlive, demoAlive] = await Promise.all([
     urlAlive(project.repo_url as string),

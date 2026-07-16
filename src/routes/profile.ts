@@ -44,4 +44,26 @@ router.post("/api/profile/name", async (req, res) => {
   res.json({ ok: true, name, token: fresh });
 });
 
+// Read-only wallet: current pixel balance and lifetime approved hours. Pixels
+// are only ever changed server-side (by the dashboard on final approval), so
+// the game just displays whatever this returns.
+router.get("/api/profile/wallet", async (req, res) => {
+  const token = typeof req.query.token === "string" ? req.query.token : "";
+  const session = token ? verifySessionToken(token) : null;
+  if (!session) return res.status(401).json({ ok: false });
+
+  const [{ data: user }, { data: txs }] = await Promise.all([
+    supabase.from("users").select("pixels").eq("id", session.userId).single(),
+    supabase
+      .from("pixel_transactions")
+      .select("hours")
+      .eq("user_id", session.userId)
+      .eq("reason", "project_approved"),
+  ]);
+  const approvedHours =
+    Math.round((txs ?? []).reduce((s, t) => s + (Number(t.hours) || 0), 0) * 10) / 10;
+  const pixels = Math.round((Number(user?.pixels) || 0) * 100) / 100;
+  res.json({ ok: true, pixels, approvedHours });
+});
+
 export default router;
