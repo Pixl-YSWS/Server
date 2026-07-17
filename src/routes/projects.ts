@@ -65,6 +65,7 @@ interface ProjectFields {
   image_url: string;
   level: number;
   used_ai: boolean;
+  ai_notes: string;
   hackatime_projects: string[];
 }
 
@@ -77,6 +78,9 @@ function parseProjectBody(
   if (!name) return { error: "name_required" };
   const repoUrl = String(body?.repoUrl ?? "").trim().slice(0, 500);
   if (repoUrl && !isGithubRepoUrl(repoUrl)) return { error: "repo_not_github" };
+  const usedAi = body?.usedAi === true;
+  const aiNotes = String(body?.aiNotes ?? "").trim().slice(0, 500);
+  if (usedAi && aiNotes.length < 10) return { error: "ai_notes_required" };
   const level = Number(body?.level ?? 1);
   return {
     fields: {
@@ -86,7 +90,8 @@ function parseProjectBody(
       demo_url: String(body?.demoUrl ?? "").trim().slice(0, 500),
       image_url: String(body?.imageUrl ?? "").trim().slice(0, 500),
       level: Number.isInteger(level) && level >= 1 && level <= 4 ? level : 1,
-      used_ai: body?.usedAi === true,
+      used_ai: usedAi,
+      ai_notes: usedAi ? aiNotes : "",
       hackatime_projects: Array.isArray(body?.hackatimeProjects)
         ? body.hackatimeProjects.map((p: unknown) => String(p)).slice(0, 50)
         : [],
@@ -207,6 +212,8 @@ router.post("/api/projects/:id/ship", async (req, res) => {
   const updateNotes = String(req.body?.updateNotes ?? "").trim().slice(0, 2000);
   if (isUpdate && !updateNotes)
     return res.status(400).json({ ok: false, error: "update_notes_required" });
+  if (isUpdate && updateNotes.length < 100)
+    return res.status(400).json({ ok: false, error: "update_notes_too_short" });
   const otherYsws = req.body?.otherYsws === true;
 
   let systemNote = "";
@@ -214,15 +221,25 @@ router.post("/api/projects/:id/ship", async (req, res) => {
     project.repo_url as string,
     project.demo_url as string,
   );
-  if (matched && !otherYsws) {
-    systemNote = `SYSTEM: ${matched} already appears in the Hack Club YSWS archive (ships.hackclub.com) but the player did not disclose it. Possible double dip — verify what is new before crediting hours.`;
-    const { error: flagError } = await supabase.from("mod_actions").insert({
-      user_id: session.userId,
-      action: "double_dip_flag",
-      detail: `"${project.name}" shipped without disclosure — ${matched} found in the YSWS archive`,
-      actor: "system",
-    });
-    if (flagError) console.error("[projects] double dip log failed", flagError);
+  if (matched) {
+    const claimedHours = Math.round((trackedSeconds / 3600) * 10) / 10;
+    const suggested = Math.max(0, Math.round((claimedHours - matched.hours) * 10) / 10);
+    const when = matched.approvedAt
+      ? new Date(matched.approvedAt * 1000).toISOString().slice(0, 10)
+      : "unknown date";
+    const overlap = `It got ${matched.hours}h there (approved ${when}); the player claims ${claimedHours}h here — suggest crediting at most ${suggested}h unless the new work is clearly separate.`;
+    if (otherYsws) {
+      systemNote = `SYSTEM: Player disclosed this was submitted to "${matched.ysws}" (${matched.url}). ${overlap}`;
+    } else {
+      systemNote = `SYSTEM: ${matched.url} already appears in the Hack Club YSWS archive under "${matched.ysws}" but the player did NOT disclose it. Possible double dip. ${overlap}`;
+      const { error: flagError } = await supabase.from("mod_actions").insert({
+        user_id: session.userId,
+        action: "double_dip_flag",
+        detail: `"${project.name}" shipped without disclosure — ${matched.url} found in the YSWS archive (${matched.ysws}, ${matched.hours}h)`,
+        actor: "system",
+      });
+      if (flagError) console.error("[projects] double dip log failed", flagError);
+    }
   }
 
   const { data, error: updateError } = await supabase
