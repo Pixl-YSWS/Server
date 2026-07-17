@@ -247,6 +247,27 @@ export function presenceFor(userId: string): {
   };
 }
 
+export function listOnlinePlayers(): {
+  userId: string;
+  displayName: string;
+  scene: string;
+  skin: string;
+}[] {
+  return [...players.values()].map((p) => ({
+    userId: p.userId,
+    displayName: p.displayName,
+    scene: p.scene,
+    skin: p.skin,
+  }));
+}
+
+export function kickPlayer(userId: string, reason: string): boolean {
+  const p = players.get(userId);
+  if (!p) return false;
+  p.ws.close(4003, (reason || "You were kicked by a moderator.").slice(0, 120));
+  return true;
+}
+
 const BAN_SWEEP_MS = 30_000;
 
 // Dashboard bans land directly in the bans table, so poll it to kick

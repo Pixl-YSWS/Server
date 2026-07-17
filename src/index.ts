@@ -9,6 +9,7 @@ import profileRouter from "./routes/profile.js";
 import friendsRouter from "./routes/friends.js";
 import uploadsRouter from "./routes/uploads.js";
 import exploreRouter from "./routes/explore.js";
+import adminRouter from "./routes/admin.js";
 import { rateLimit } from "./rateLimit.js";
 import { attachWebSocketServer } from "./ws/gameServer.js";
 
@@ -44,6 +45,7 @@ app.use(profileRouter);
 app.use(friendsRouter);
 app.use(uploadsRouter);
 app.use(exploreRouter);
+app.use(adminRouter);
 
 app.get("/", (_req, res) => res.json({ name: "pixl-server", status: "ok" }));
 app.get("/health", (_req, res) => res.json({ ok: true }));
