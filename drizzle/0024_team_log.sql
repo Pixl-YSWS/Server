@@ -8,6 +8,8 @@ create table if not exists team_log (
   before jsonb not null default '[]'::jsonb,
   after jsonb not null default '[]'::jsonb,
   actor text not null default '',
+  reason text not null default '',
   created_at timestamptz not null default now()
 );
+alter table team_log add column if not exists reason text not null default '';
 create index if not exists team_log_created_idx on team_log (created_at desc);
