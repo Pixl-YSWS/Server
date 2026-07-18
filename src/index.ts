@@ -12,6 +12,7 @@ import exploreRouter from "./routes/explore.js";
 import adminRouter from "./routes/admin.js";
 import shopRouter from "./routes/shop.js";
 import eventsRouter from "./routes/events.js";
+import sidequestsRouter from "./routes/sidequests.js";
 import { rateLimit } from "./rateLimit.js";
 import { attachWebSocketServer } from "./ws/gameServer.js";
 
@@ -50,6 +51,7 @@ app.use(exploreRouter);
 app.use(adminRouter);
 app.use(shopRouter);
 app.use(eventsRouter);
+app.use(sidequestsRouter);
 
 app.get("/", (_req, res) => res.json({ name: "pixl-server", status: "ok" }));
 app.get("/health", (_req, res) => res.json({ ok: true }));

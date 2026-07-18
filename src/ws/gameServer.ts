@@ -1,7 +1,7 @@
 import { WebSocketServer, WebSocket } from "ws";
 import type { Server } from "http";
 import { verifySessionToken } from "../auth/session.js";
-import { activeBan, censorChat, logViolation } from "../moderation.js";
+import { activeBan, censorChat, recordChatViolation } from "../moderation.js";
 import { areFriends } from "../social.js";
 import { supabase, type PlayerStateRow } from "../db/client.js";
 import {
@@ -259,6 +259,35 @@ export function listOnlinePlayers(): {
     scene: p.scene,
     skin: p.skin,
   }));
+}
+
+// Filter hit: log it, warn from the 3rd violation, auto-ban at the 7th.
+async function punishChat(
+  player: ConnectedPlayer,
+  ws: WebSocket,
+  raw: string,
+): Promise<void> {
+  try {
+    const outcome = await recordChatViolation(player.userId, raw);
+    if (outcome.banned) {
+      kickPlayer(
+        player.userId,
+        "Banned automatically after repeated chat violations.",
+      );
+      return;
+    }
+    if (outcome.warned && ws.readyState === WebSocket.OPEN)
+      ws.send(
+        JSON.stringify({
+          type: "chat",
+          userId: "__pixl__",
+          displayName: "Pixl",
+          text: `⚠ Warning ${outcome.count}/7 — keep the chat clean. 7 violations = automatic ban.`,
+        }),
+      );
+  } catch (e) {
+    console.error("punishChat failed", e);
+  }
 }
 
 export function kickPlayer(userId: string, reason: string): boolean {
@@ -626,7 +655,7 @@ export function attachWebSocketServer(httpServer: Server) {
           .trim()
           .slice(0, 200);
         const text = censorChat(raw);
-        if (text !== raw) logViolation(player.userId, "chat", raw);
+        if (text !== raw) void punishChat(player, ws, raw);
         if (!text) return;
 
         broadcastToScene(player.scene, {
@@ -645,7 +674,7 @@ export function attachWebSocketServer(httpServer: Server) {
           .slice(0, 200);
         if (!targetName || !raw) return;
         const text = censorChat(raw);
-        if (text !== raw) logViolation(player.userId, "chat", raw);
+        if (text !== raw) void punishChat(player, ws, raw);
 
         let target: ConnectedPlayer | undefined;
         for (const p of players.values()) {
