@@ -131,6 +131,40 @@ router.get("/api/explore/leaderboard", async (req, res) => {
   res.json({ ok: true, players, yourRank, yourPixels, sprint });
 });
 
+// Proxy to Pixo's avatar pixelator so the API key never reaches the client.
+// Returns the player's Slack avatar as an already-pixelated PNG.
+const EXTERNAL_PIXIFY_URL =
+  process.env.EXTERNAL_PIXIFY_URL ??
+  "https://dashboard.gabintavernier.com/api/external/pixify";
+
+router.get("/api/pixify", async (req, res) => {
+  const token = typeof req.query.token === "string" ? req.query.token : "";
+  const session = token ? verifySessionToken(token) : null;
+  if (!session) return res.status(401).json({ ok: false });
+
+  const slackId = typeof req.query.user === "string" ? req.query.user : "";
+  const size = Math.min(Math.max(Number(req.query.size) || 32, 2), 64);
+  const key = process.env.EXTERNAL_API_KEY;
+  if (!slackId || !/^[A-Z0-9]{5,20}$/.test(slackId))
+    return res.status(400).json({ ok: false });
+  if (!key) return res.status(503).json({ ok: false, error: "pixify_not_configured" });
+
+  try {
+    const r = await fetch(
+      `${EXTERNAL_PIXIFY_URL}?userId=${encodeURIComponent(slackId)}&size=${size}`,
+      { headers: { "x-api-key": key }, signal: AbortSignal.timeout(10_000) },
+    );
+    if (!r.ok) return res.status(r.status === 404 ? 404 : 502).json({ ok: false });
+    const buf = Buffer.from(await r.arrayBuffer());
+    res
+      .set("Content-Type", "image/png")
+      .set("Cache-Control", "public, max-age=3600")
+      .send(buf);
+  } catch {
+    res.status(502).json({ ok: false });
+  }
+});
+
 router.get("/api/explore/showcase", async (req, res) => {
   const token = typeof req.query.token === "string" ? req.query.token : "";
   const session = token ? verifySessionToken(token) : null;
@@ -177,7 +211,7 @@ router.get("/api/explore/players/:id", async (req, res) => {
   const [user, projects] = await Promise.all([
     supabase
       .from("users")
-      .select("id, display_name, skin, created_at, pixels, avatar_url, card_pixelate")
+      .select("id, display_name, skin, created_at, pixels, avatar_url, card_pixelate, slack_id")
       .eq("id", id)
       .maybeSingle(),
     supabase
