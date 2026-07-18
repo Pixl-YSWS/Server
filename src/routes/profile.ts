@@ -2,6 +2,7 @@ import { Router } from "express";
 import { issueSessionToken, verifySessionToken } from "../auth/session.js";
 import { containsBlocked, logViolation } from "../moderation.js";
 import { supabase } from "../db/client.js";
+import { approvedHoursFor, levelFor, pxPerHourFor } from "../xp.js";
 
 const router = Router();
 
@@ -52,27 +53,18 @@ router.get("/api/profile/wallet", async (req, res) => {
   const session = token ? verifySessionToken(token) : null;
   if (!session) return res.status(401).json({ ok: false });
 
-  const [{ data: user }, { data: projects }] = await Promise.all([
+  const [{ data: user }, approvedHours] = await Promise.all([
     supabase.from("users").select("pixels").eq("id", session.userId).single(),
-    supabase
-      .from("projects")
-      .select("approved_hours, hackatime_seconds")
-      .eq("user_id", session.userId)
-      .eq("status", "approved")
-      .is("banned_at", null),
+    approvedHoursFor(session.userId),
   ]);
-  const approvedHours =
-    Math.round(
-      (projects ?? []).reduce((s, p) => {
-        const h =
-          p.approved_hours != null
-            ? Number(p.approved_hours)
-            : (Number(p.hackatime_seconds) || 0) / 3600;
-        return s + (Number.isFinite(h) ? h : 0);
-      }, 0) * 10,
-    ) / 10;
   const pixels = Math.round(Number(user?.pixels) || 0);
-  res.json({ ok: true, pixels, approvedHours });
+  res.json({
+    ok: true,
+    pixels,
+    approvedHours,
+    level: levelFor(approvedHours),
+    pxPerHour: pxPerHourFor(approvedHours),
+  });
 });
 
 // The player's own pixel ledger, newest first, with project names attached.

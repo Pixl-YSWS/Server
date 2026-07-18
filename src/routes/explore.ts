@@ -2,6 +2,7 @@ import { Router } from "express";
 import { verifySessionToken } from "../auth/session.js";
 import { supabase } from "../db/client.js";
 import { activeEvents } from "../events.js";
+import { approvedHoursFor, levelFor } from "../xp.js";
 
 const router = Router();
 
@@ -225,7 +226,12 @@ router.get("/api/explore/players/:id", async (req, res) => {
   ]);
   if (user.error || !user.data) return res.status(404).json({ ok: false });
 
-  res.json({ ok: true, player: user.data, projects: projects.data ?? [] });
+  const xp = await approvedHoursFor(id);
+  res.json({
+    ok: true,
+    player: { ...user.data, xp_hours: xp, level: levelFor(xp) },
+    projects: projects.data ?? [],
+  });
 });
 
 // Browse everyone's projects, newest first, with an optional search filter.
