@@ -13,6 +13,7 @@ const BLOCKED = [
   "pussy",
   "whore",
   "slut",
+  "siut",
   "faggot",
   "nigger",
   "nigga",
@@ -32,6 +33,43 @@ const BLOCKED = [
   "vagina",
   "porn",
   "sexy",
+  "jizz",
+  "hentai",
+  "blowjob",
+  "handjob",
+  "dildo",
+  "milf",
+  "boobs",
+  "titties",
+  "orgasm",
+  "masturbat",
+  "deepthroat",
+];
+
+// Insults matched as whole words only (substring would hit "father",
+// "so fa table"…). Tokens are folded first, so fατ / f4t / faaat still count.
+const BLOCKED_EXACT = [
+  "fat",
+  "fatty",
+  "ugly",
+  "stupid",
+  "dumb",
+  "dumbass",
+  "idiot",
+  "loser",
+  "moron",
+  "imbecile",
+  "cum",
+  "cums",
+  "cumming",
+  "cummed",
+  "anal",
+  "sex",
+  "tits",
+  "horny",
+  "thot",
+  "nudes",
+  "nude",
 ];
 
 // Cyrillic/Greek lookalikes folded to the latin letters they imitate, so
@@ -74,10 +112,19 @@ function collapseRuns(flat: string): string {
   return out;
 }
 
+function isExactBlocked(foldedToken: string): boolean {
+  if (foldedToken === "") return false;
+  const collapsed = collapseRuns(foldedToken);
+  return BLOCKED_EXACT.includes(foldedToken) || BLOCKED_EXACT.includes(collapsed);
+}
+
 export function containsBlocked(raw: string): boolean {
   const flat = normalize(raw);
   const collapsed = collapseRuns(flat);
-  return BLOCKED.some((bad) => flat.includes(bad) || collapsed.includes(bad));
+  if (BLOCKED.some((bad) => flat.includes(bad) || collapsed.includes(bad))) return true;
+  return raw
+    .split(/\s+/)
+    .some((token) => isExactBlocked(normalize(token)));
 }
 
 // Stars out every span whose folded letters spell a blocked word — across
@@ -124,6 +171,26 @@ export function censorChat(text: string): string {
       idx += 1;
     }
   }
+  // Exact-word insults: mark whole tokens (runs of foldable chars) whose
+  // folded form is on the exact list.
+  let tokenStart = -1;
+  let tokenFolded = "";
+  const flushToken = (end: number) => {
+    if (tokenStart >= 0 && isExactBlocked(tokenFolded))
+      for (let i = tokenStart; i < end; i++) hit.add(i);
+    tokenStart = -1;
+    tokenFolded = "";
+  };
+  for (let i = 0; i < chars.length; i++) {
+    const f = foldChar(chars[i]);
+    if (f === "") flushToken(i);
+    else {
+      if (tokenStart < 0) tokenStart = i;
+      tokenFolded += f;
+    }
+  }
+  flushToken(chars.length);
+
   if (hit.size === 0) return text;
 
   const starred = [...hit].sort((a, b) => a - b);
@@ -145,6 +212,33 @@ export function censorChat(text: string): string {
 
 const WARN_AFTER = 3;
 const BAN_AFTER = 7;
+
+const EXTERNAL_DM_URL =
+  process.env.EXTERNAL_DM_URL ?? "https://dashboard.gabintavernier.com/api/external/dm";
+
+// Slack DM as Pixo (same external API the dashboard uses). Fire-and-forget:
+// moderation must never fail because the DM did.
+async function dmSlack(userId: string, text: string): Promise<void> {
+  const key = process.env.EXTERNAL_API_KEY;
+  if (!key) return;
+  const { data: user } = await supabase
+    .from("users")
+    .select("slack_id")
+    .eq("id", userId)
+    .maybeSingle();
+  const slackId = (user?.slack_id as string) ?? "";
+  if (!slackId) return;
+  try {
+    await fetch(EXTERNAL_DM_URL, {
+      method: "POST",
+      headers: { "x-api-key": key, "Content-Type": "application/json" },
+      body: JSON.stringify({ userId: slackId, message: text }),
+      signal: AbortSignal.timeout(8000),
+    });
+  } catch (e) {
+    console.error("moderation dm failed", e);
+  }
+}
 
 export interface ViolationOutcome {
   count: number;
@@ -174,21 +268,25 @@ export async function recordChatViolation(
       await supabase
         .from("bans")
         .insert({ user_id: userId, reason, banned_by: "Auto-mod" });
+      const body = `You've been banned automatically after ${n} chat filter violations. If you believe this is a mistake, contact the Pixl team.`;
       await supabase.from("notifications").insert({
         user_id: userId,
         title: "Banned from Pixl",
-        body: `You've been banned automatically after ${n} chat filter violations. If you believe this is a mistake, contact the Pixl team.`,
+        body,
       });
+      await dmSlack(userId, `You've been banned from Pixl.\n\n${body}`);
       return { count: n, warned: false, banned: true };
     }
     return { count: n, warned: true, banned: false };
   }
   if (n >= WARN_AFTER) {
+    const body = `Warning ${n}/${BAN_AFTER}: keep the chat clean. At ${BAN_AFTER} violations you're banned automatically.`;
     await supabase.from("notifications").insert({
       user_id: userId,
       title: "Chat warning",
-      body: `Warning ${n}/${BAN_AFTER}: keep the chat clean. At ${BAN_AFTER} violations you're banned automatically.`,
+      body,
     });
+    await dmSlack(userId, `⚠ ${body}`);
     return { count: n, warned: true, banned: false };
   }
   return { count: n, warned: false, banned: false };
