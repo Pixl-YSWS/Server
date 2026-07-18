@@ -3,8 +3,16 @@ import crypto from "crypto";
 import { supabase, type UserRow } from "../db/client.js";
 import { issueSessionToken } from "../auth/session.js";
 import { activeBan } from "../moderation.js";
+import { fetchSlackAvatar } from "../slackAvatar.js";
 
 const router = Router();
+
+async function saveSlackAvatar(userId: string, slackId: string): Promise<void> {
+  const url = await fetchSlackAvatar(slackId);
+  if (!url) return;
+  const { error } = await supabase.from("users").update({ avatar_url: url }).eq("id", userId);
+  if (error) console.error("Failed to save slack avatar", error.message);
+}
 
 router.get("/auth/demo", async (req, res) => {
   if (process.env.ALLOW_DEMO_LOGIN !== "true") {
@@ -207,6 +215,8 @@ router.get("/auth/hackclub/callback", async (req, res) => {
           if (e) console.error("Failed to backfill slack_id/email", e);
         });
     }
+    if (identity.slack_id && !(existing as { avatar_url?: string | null }).avatar_url)
+      void saveSlackAvatar(userId, identity.slack_id);
   } else {
     isNewUser = true;
     const { data: created, error: insertError } = await supabase
@@ -230,6 +240,7 @@ router.get("/auth/hackclub/callback", async (req, res) => {
     const row = created as UserRow;
     userId = row.id;
     displayName = row.display_name;
+    if (identity.slack_id) void saveSlackAvatar(userId, identity.slack_id);
 
     const { error: stateError } = await supabase
       .from("player_state")

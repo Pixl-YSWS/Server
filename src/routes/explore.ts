@@ -175,7 +175,11 @@ router.get("/api/explore/players/:id", async (req, res) => {
 
   const id = String(req.params.id);
   const [user, projects] = await Promise.all([
-    supabase.from("users").select("id, display_name, skin, created_at, pixels").eq("id", id).maybeSingle(),
+    supabase
+      .from("users")
+      .select("id, display_name, skin, created_at, pixels, avatar_url, card_pixelate")
+      .eq("id", id)
+      .maybeSingle(),
     supabase
       .from("projects")
       .select("*")

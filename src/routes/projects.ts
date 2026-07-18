@@ -25,71 +25,27 @@ router.get("/api/projects", async (req, res) => {
   }
   const projects = data ?? [];
   const ids = projects.map((p) => p.id as number);
-  const streaks = new Map<number, { current: number; best: number }>();
   const earned = new Map<number, number>();
   if (ids.length > 0) {
-    const [{ data: journals }, { data: txs }] = await Promise.all([
-      supabase
-        .from("project_journals")
-        .select("project_id, created_at")
-        .in("project_id", ids),
-      supabase
-        .from("pixel_transactions")
-        .select("project_id, amount")
-        .in("project_id", ids)
-        .in("reason", ["project_approved", "review_reverted"]),
-    ]);
+    const { data: txs } = await supabase
+      .from("pixel_transactions")
+      .select("project_id, amount")
+      .in("project_id", ids)
+      .in("reason", ["project_approved", "review_reverted"]);
     for (const t of txs ?? [])
       earned.set(
         t.project_id as number,
         (earned.get(t.project_id as number) ?? 0) + Number(t.amount),
       );
-    const daysByProject = new Map<number, Set<number>>();
-    for (const j of journals ?? []) {
-      const day = Math.floor(new Date(j.created_at as string).getTime() / 86400_000);
-      const set = daysByProject.get(j.project_id as number) ?? new Set<number>();
-      set.add(day);
-      daysByProject.set(j.project_id as number, set);
-    }
-    for (const [pid, set] of daysByProject) streaks.set(pid, journalStreaks(set));
   }
   res.json({
     ok: true,
-    projects: projects.map((p) => {
-      const s = streaks.get(p.id as number) ?? { current: 0, best: 0 };
-      return {
-        ...p,
-        streak: s.current,
-        best_streak: s.best,
-        pixels_earned: earned.get(p.id as number) ?? 0,
-      };
-    }),
+    projects: projects.map((p) => ({
+      ...p,
+      pixels_earned: earned.get(p.id as number) ?? 0,
+    })),
   });
 });
-
-// A project's streak is its run of consecutive UTC days with at least one
-// journal entry. 'current' is the run ending today or yesterday (still alive);
-// 'best' is the longest run ever and is what boosts the approval payout.
-function journalStreaks(days: Set<number>): { current: number; best: number } {
-  const sorted = [...days].sort((a, b) => a - b);
-  let best = 0;
-  let run = 0;
-  for (let i = 0; i < sorted.length; i++) {
-    run = i > 0 && sorted[i] === sorted[i - 1] + 1 ? run + 1 : 1;
-    if (run > best) best = run;
-  }
-  const today = Math.floor(Date.now() / 86400_000);
-  const last = sorted[sorted.length - 1] ?? -1;
-  let current = 0;
-  if (last === today || last === today - 1) {
-    current = 1;
-    for (let i = sorted.length - 2; i >= 0; i--) {
-      if (sorted[i] === sorted[i + 1] - 1) current++;
-      else break;
-    }
-  }
-  return { current, best };
-}
 
 function isGithubRepoUrl(url: string): boolean {
   let u: URL;

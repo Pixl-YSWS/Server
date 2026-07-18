@@ -26,7 +26,6 @@ router.get("/api/events/active", async (req, res) => {
       item.bonus_pct = Number(ev.config.bonusPct) || 0;
     }
     if (ev.type === "bounty") item.reward = Number(ev.config.reward) || 0;
-    if (ev.type === "double_streak") item.per_day = Number(ev.config.perDay) || 2;
     out.push(item);
   }
   res.json({ ok: true, events: out });

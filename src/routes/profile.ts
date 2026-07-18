@@ -115,4 +115,59 @@ router.get("/api/profile/transactions", async (req, res) => {
   });
 });
 
+// Player-card photo settings. The photo itself goes through /api/uploads
+// (or comes from Slack at sign-up); these just point the card at it.
+router.get("/api/profile/card", async (req, res) => {
+  const token = typeof req.query.token === "string" ? req.query.token : "";
+  const session = token ? verifySessionToken(token) : null;
+  if (!session) return res.status(401).json({ ok: false });
+
+  const { data: user } = await supabase
+    .from("users")
+    .select("avatar_url, card_pixelate")
+    .eq("id", session.userId)
+    .maybeSingle();
+  res.json({
+    ok: true,
+    avatar_url: user?.avatar_url ?? "",
+    pixelate: user?.card_pixelate ?? true,
+  });
+});
+
+router.post("/api/profile/card-image", async (req, res) => {
+  const token = typeof req.query.token === "string" ? req.query.token : "";
+  const session = token ? verifySessionToken(token) : null;
+  if (!session) return res.status(401).json({ ok: false });
+
+  const url = typeof req.body?.url === "string" ? req.body.url.trim() : "";
+  if (!url.startsWith("https://") || url.length > 500)
+    return res.status(400).json({ ok: false, error: "bad_url" });
+  const { error } = await supabase
+    .from("users")
+    .update({ avatar_url: url })
+    .eq("id", session.userId);
+  if (error) {
+    console.error("[profile] card image update failed", error.message);
+    return res.status(500).json({ ok: false });
+  }
+  res.json({ ok: true });
+});
+
+router.post("/api/profile/card-pixelate", async (req, res) => {
+  const token = typeof req.query.token === "string" ? req.query.token : "";
+  const session = token ? verifySessionToken(token) : null;
+  if (!session) return res.status(401).json({ ok: false });
+
+  const pixelate = req.body?.pixelate === true;
+  const { error } = await supabase
+    .from("users")
+    .update({ card_pixelate: pixelate })
+    .eq("id", session.userId);
+  if (error) {
+    console.error("[profile] card pixelate update failed", error.message);
+    return res.status(500).json({ ok: false });
+  }
+  res.json({ ok: true });
+});
+
 export default router;
