@@ -54,6 +54,7 @@ const LEET: Record<string, string> = {
 // One character -> the latin letter it reads as, or "" for separators.
 function foldChar(ch: string): string {
   let c = ch.toLowerCase();
+  if (HOMOGLYPHS[c]) c = HOMOGLYPHS[c];
   c = c.normalize("NFKD").replace(/[̀-ͯ]/g, "");
   if (c.length > 1) c = c[0] ?? "";
   if (HOMOGLYPHS[c]) c = HOMOGLYPHS[c];
