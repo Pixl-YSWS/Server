@@ -70,6 +70,22 @@ const BLOCKED_EXACT = [
   "thot",
   "nudes",
   "nude",
+  "fuk",
+  "fuc",
+  "fck",
+  "fudk",
+  "fux",
+  "fack",
+  "phuck",
+  "dik",
+  "dlck",
+  "cok",
+  "pnis",
+  "ponis",
+  "penus",
+  "bich",
+  "biatch",
+  "shyt",
 ];
 
 // Cyrillic/Greek lookalikes folded to the latin letters they imitate, so
@@ -82,6 +98,10 @@ const HOMOGLYPHS: Record<string, string> = {
   "κ": "k", "ν": "v", "ο": "o", "ρ": "p", "σ": "s", "ς": "s", "τ": "t",
   "υ": "u", "χ": "x", "ω": "w", "μ": "u", "λ": "l", "θ": "o", "π": "n",
   "ϲ": "c", "ϳ": "j", "ϝ": "f", "ѵ": "v", "ъ": "b", "ь": "b", "ц": "u",
+  "ø": "o", "ß": "s", "æ": "a", "œ": "o", "ł": "l", "đ": "d", "ð": "d",
+  "ħ": "h", "þ": "p", "ŧ": "t", "ı": "i", "ŋ": "n", "ə": "e", "ǝ": "e",
+  "ɑ": "a", "ɔ": "o", "ƒ": "f", "ɡ": "g", "ĸ": "k", "ſ": "s", "ʃ": "s",
+  "ʒ": "z", "ɐ": "a", "ʇ": "t", "ʞ": "k", "ɟ": "f", "ɹ": "r", "ʍ": "w",
 };
 
 const LEET: Record<string, string> = {
