@@ -114,11 +114,17 @@ router.get("/api/profile/card", async (req, res) => {
   const session = token ? verifySessionToken(token) : null;
   if (!session) return res.status(401).json({ ok: false });
 
-  const { data: user } = await supabase
+  let { data: user, error } = await supabase
     .from("users")
     .select("avatar_url, card_pixelate")
     .eq("id", session.userId)
     .maybeSingle();
+  if (error)
+    ({ data: user } = (await supabase
+      .from("users")
+      .select("avatar_url")
+      .eq("id", session.userId)
+      .maybeSingle()) as { data: typeof user });
   res.json({
     ok: true,
     avatar_url: user?.avatar_url ?? "",

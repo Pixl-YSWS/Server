@@ -13,13 +13,28 @@ router.get("/api/explore/players", async (req, res) => {
   if (!session) return res.status(401).json({ ok: false });
 
   const q = typeof req.query.q === "string" ? req.query.q.trim() : "";
-  let query = supabase
-    .from("users")
-    .select("id, display_name, skin, created_at, avatar_url, card_pixelate, slack_id")
-    .order("created_at", { ascending: false })
-    .limit(100);
-  if (q) query = query.ilike("display_name", `%${q}%`);
-  const { data: users, error } = await query;
+  const buildQuery = (fields: string) => {
+    let query = supabase
+      .from("users")
+      .select(fields)
+      .order("created_at", { ascending: false })
+      .limit(100);
+    if (q) query = query.ilike("display_name", `%${q}%`);
+    return query;
+  };
+  // card_pixelate arrives with migration 0030 — fall back gracefully before it.
+  const first = await buildQuery(
+    "id, display_name, skin, created_at, avatar_url, card_pixelate, slack_id",
+  );
+  let users = (first.data ?? null) as Record<string, unknown>[] | null;
+  let error = first.error;
+  if (error) {
+    const second = await buildQuery(
+      "id, display_name, skin, created_at, avatar_url, slack_id",
+    );
+    users = (second.data ?? null) as Record<string, unknown>[] | null;
+    error = second.error;
+  }
   if (error) {
     console.error("[explore] players failed", error);
     return res.status(500).json({ ok: false });
@@ -209,12 +224,11 @@ router.get("/api/explore/players/:id", async (req, res) => {
   if (!session) return res.status(401).json({ ok: false });
 
   const id = String(req.params.id);
-  const [user, projects] = await Promise.all([
-    supabase
-      .from("users")
-      .select("id, display_name, skin, created_at, pixels, avatar_url, card_pixelate, slack_id")
-      .eq("id", id)
-      .maybeSingle(),
+  const userQuery = (fields: string) =>
+    supabase.from("users").select(fields).eq("id", id).maybeSingle();
+  const [user, fallbackUser, projects] = await Promise.all([
+    userQuery("id, display_name, skin, created_at, pixels, avatar_url, card_pixelate, slack_id"),
+    userQuery("id, display_name, skin, created_at, pixels, avatar_url, slack_id"),
     supabase
       .from("projects")
       .select("*")
@@ -224,12 +238,13 @@ router.get("/api/explore/players/:id", async (req, res) => {
     .is("banned_at", null)
       .order("created_at", { ascending: false }),
   ]);
-  if (user.error || !user.data) return res.status(404).json({ ok: false });
+  const data = (user.error ? fallbackUser.data : user.data) as Record<string, unknown> | null;
+  if (!data) return res.status(404).json({ ok: false });
 
   const xp = await approvedHoursFor(id);
   res.json({
     ok: true,
-    player: { ...user.data, xp_hours: xp, level: levelFor(xp) },
+    player: { ...data, xp_hours: xp, level: levelFor(xp) },
     projects: projects.data ?? [],
   });
 });
