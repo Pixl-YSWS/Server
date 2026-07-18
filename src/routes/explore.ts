@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { verifySessionToken } from "../auth/session.js";
 import { supabase } from "../db/client.js";
+import { activeEvents } from "../events.js";
 
 const router = Router();
 
@@ -90,7 +91,44 @@ router.get("/api/explore/leaderboard", async (req, res) => {
     }
   }
 
-  res.json({ ok: true, players, yourRank, yourPixels });
+  // During a leaderboard sprint, a second board counts only pixels earned
+  // inside the event window (approvals and bounties — nothing manual).
+  let sprint: Record<string, unknown> | null = null;
+  const [sprintEvent] = await activeEvents(["leaderboard_sprint"]);
+  if (sprintEvent) {
+    const { data: txs } = await supabase
+      .from("pixel_transactions")
+      .select("user_id, amount")
+      .gt("amount", 0)
+      .in("reason", ["project_approved", "bounty"])
+      .gte("created_at", sprintEvent.starts_at)
+      .lt("created_at", sprintEvent.ends_at);
+    const earned = new Map<string, number>();
+    for (const t of txs ?? [])
+      earned.set(t.user_id as string, (earned.get(t.user_id as string) ?? 0) + Number(t.amount));
+    const ranked = [...earned.entries()].sort((a, b) => b[1] - a[1]).slice(0, 25);
+    const names = new Map<string, string>();
+    if (ranked.length > 0) {
+      const { data: users } = await supabase
+        .from("users")
+        .select("id, display_name")
+        .in("id", ranked.map(([id]) => id));
+      for (const u of users ?? []) names.set(u.id as string, u.display_name as string);
+    }
+    sprint = {
+      name: sprintEvent.name || "Leaderboard sprint",
+      ends_at: sprintEvent.ends_at,
+      players: ranked.map(([id, px], i) => ({
+        rank: i + 1,
+        display_name: names.get(id) ?? "?",
+        pixels: Math.round(px),
+        you: id === session.userId,
+      })),
+      your_pixels: Math.round(earned.get(session.userId) ?? 0),
+    };
+  }
+
+  res.json({ ok: true, players, yourRank, yourPixels, sprint });
 });
 
 router.get("/api/explore/showcase", async (req, res) => {
