@@ -15,7 +15,7 @@ router.get("/api/explore/players", async (req, res) => {
   const q = typeof req.query.q === "string" ? req.query.q.trim() : "";
   let query = supabase
     .from("users")
-    .select("id, display_name, skin, created_at")
+    .select("id, display_name, skin, created_at, avatar_url, card_pixelate, slack_id")
     .order("created_at", { ascending: false })
     .limit(100);
   if (q) query = query.ilike("display_name", `%${q}%`);
