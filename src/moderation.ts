@@ -86,6 +86,10 @@ const BLOCKED_EXACT = [
   "bich",
   "biatch",
   "shyt",
+  "mf",
+  "mfs",
+  "mfer",
+  "mfers",
 ];
 
 // Cyrillic/Greek lookalikes folded to the latin letters they imitate, so
