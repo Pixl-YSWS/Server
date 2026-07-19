@@ -294,6 +294,46 @@ router.post("/api/projects/:id/ship", async (req, res) => {
   res.json({ ok: true, project: data });
 });
 
+// Withdraw a project from the review queue back to a draft so the owner can
+// edit it. Only allowed while it's actually in review (shipped/second_review).
+router.post("/api/projects/:id/unship", async (req, res) => {
+  const token = typeof req.query.token === "string" ? req.query.token : "";
+  const session = token ? verifySessionToken(token) : null;
+  if (!session) return res.status(401).json({ ok: false });
+
+  const id = Number(req.params.id);
+  if (!Number.isFinite(id)) return res.status(400).json({ ok: false });
+
+  const { data: project } = await supabase
+    .from("projects")
+    .select("id, name, status")
+    .eq("id", id)
+    .eq("user_id", session.userId)
+    .maybeSingle();
+  if (!project) return res.status(404).json({ ok: false });
+  if (project.status !== "shipped" && project.status !== "second_review")
+    return res.status(400).json({ ok: false, error: "not_in_review" });
+
+  const { data, error } = await supabase
+    .from("projects")
+    .update({
+      status: "draft",
+      shipped_at: null,
+      review_note: "",
+      reviewing_by: "",
+      reviewing_at: null,
+    })
+    .eq("id", id)
+    .eq("user_id", session.userId)
+    .select()
+    .single();
+  if (error) {
+    console.error("[projects] unship failed", error);
+    return res.status(500).json({ ok: false });
+  }
+  res.json({ ok: true, project: data });
+});
+
 async function ownsProject(userId: string, projectId: number): Promise<boolean> {
   const { data, error } = await supabase
     .from("projects")
@@ -348,6 +388,14 @@ router.post("/api/projects/:id/journal", async (req, res) => {
   let hours = Number(req.body?.hours ?? 0);
   if (!Number.isFinite(hours) || hours < 0) hours = 0;
   hours = Math.min(Math.round(hours * 100) / 100, 100);
+
+  // Entries that log time need substance: at least 100 characters per hour
+  // (min 100 for any logged time), so "4h" can't be a one-liner.
+  if (hours > 0) {
+    const need = Math.max(100, Math.round(hours * 100));
+    if (content.length < need)
+      return res.status(400).json({ ok: false, error: "journal_too_short", need, hours });
+  }
 
   const { data, error } = await supabase
     .from("project_journals")
