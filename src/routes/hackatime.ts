@@ -109,15 +109,17 @@ router.get("/hackatime/callback", async (req, res) => {
     const data = (await tokenRes.json()) as { access_token?: string };
     if (!data.access_token) return res.status(502).send(page("HackTime returned no token."));
 
-    const { error } = await supabase
+    const { data: updated, error } = await supabase
       .from("users")
       .update({ hackatime_token: data.access_token })
-      .eq("id", userId);
-    if (error) {
-      console.error("[hackatime] failed to save token", error);
-      return res.status(500).send(page("Could not save your connection."));
+      .eq("id", userId)
+      .select("id");
+    if (error || !updated || updated.length === 0) {
+      console.error("[hackatime] failed to save token", { userId, error, matched: updated?.length ?? 0 });
+      return res.status(500).send(page("Could not save your connection — no matching account. Try reopening the page from the game."));
     }
 
+    console.log("[hackatime] token saved for", userId);
     res.send(page("✅ HackTime connected! You can close this tab and return to the game."));
   } catch (e) {
     console.error("[hackatime] callback failed", e);
