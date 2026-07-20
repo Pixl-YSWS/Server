@@ -27,6 +27,22 @@ export async function fetchTargetChat(
   return data ?? [];
 }
 
+// Models don't always honour strict-JSON mode: they may wrap output in ```json
+// fences or add prose. Strip fences and slice the first {...} block before parse.
+function parseJsonLoose(raw: string): Partial<ReportAiResult> | null {
+  let s = raw.trim();
+  const fence = s.match(/```(?:json)?\s*([\s\S]*?)```/i);
+  if (fence) s = fence[1].trim();
+  const start = s.indexOf("{");
+  const end = s.lastIndexOf("}");
+  if (start !== -1 && end > start) s = s.slice(start, end + 1);
+  try {
+    return JSON.parse(s) as Partial<ReportAiResult>;
+  } catch {
+    return null;
+  }
+}
+
 export async function analyzeReport(
   targetName: string,
   reason: string,
@@ -60,7 +76,7 @@ export async function analyzeReport(
         model: MODEL,
         messages: [{ role: "user", content: prompt }],
         temperature: 0.2,
-        max_tokens: 300,
+        max_tokens: 600,
         response_format: { type: "json_object" },
       }),
       signal: AbortSignal.timeout(30_000),
@@ -72,9 +88,12 @@ export async function analyzeReport(
     const json = (await r.json()) as {
       choices?: { message?: { content?: string } }[];
     };
-    let content = json.choices?.[0]?.message?.content ?? "";
-    content = content.replace(/^```(?:json)?\s*/i, "").replace(/```$/i, "").trim();
-    const parsed = JSON.parse(content) as Partial<ReportAiResult>;
+    const content = json.choices?.[0]?.message?.content ?? "";
+    const parsed = parseJsonLoose(content);
+    if (!parsed) {
+      console.error("analyzeReport: unparseable model output", content.slice(0, 300));
+      return null;
+    }
     return {
       score: Math.max(0, Math.min(100, Math.round(Number(parsed.score) || 0))),
       verdict: String(parsed.verdict ?? "").slice(0, 40),
