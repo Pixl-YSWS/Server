@@ -72,7 +72,8 @@ export async function analyzeReport(
     const json = (await r.json()) as {
       choices?: { message?: { content?: string } }[];
     };
-    const content = json.choices?.[0]?.message?.content ?? "";
+    let content = json.choices?.[0]?.message?.content ?? "";
+    content = content.replace(/^```(?:json)?\s*/i, "").replace(/```$/i, "").trim();
     const parsed = JSON.parse(content) as Partial<ReportAiResult>;
     return {
       score: Math.max(0, Math.min(100, Math.round(Number(parsed.score) || 0))),
