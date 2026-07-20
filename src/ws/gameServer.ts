@@ -104,6 +104,9 @@ function closeLobby(id: string) {
 
 const SAVE_INTERVAL_MS = 5000;
 
+// Per-reporter timestamps of recent reports, to throttle spam (max 5 / minute).
+const reportStamps = new Map<string, number[]>();
+
 function broadcastToScene(
   scene: string,
   message: object,
@@ -711,6 +714,62 @@ export function attachWebSocketServer(httpServer: Server) {
         });
         if (target.ws.readyState === WebSocket.OPEN) target.ws.send(frame);
         ws.send(frame);
+      }
+
+      if (msg.type === "report") {
+        const reporterId = player.userId;
+        const targetId = String(msg.targetId ?? "").trim();
+        const reason = String(msg.reason ?? "")
+          .replace(/\s+/g, " ")
+          .trim()
+          .slice(0, 300);
+        const ackFail = (text: string) =>
+          ws.send(JSON.stringify({ type: "report_ack", ok: false, text }));
+        if (!targetId || targetId === reporterId)
+          return ackFail("You can't report that player.");
+        const context = (Array.isArray(msg.context) ? msg.context : [])
+          .slice(-20)
+          .map((c: unknown) => {
+            const o = (c ?? {}) as Record<string, unknown>;
+            return {
+              name: String(o.name ?? "").slice(0, 60),
+              text: String(o.text ?? "").slice(0, 200),
+            };
+          });
+        const now = Date.now();
+        const stamps = (reportStamps.get(reporterId) ?? []).filter(
+          (t) => now - t < 60_000,
+        );
+        if (stamps.length >= 5)
+          return ackFail("You're reporting too fast — give it a minute.");
+        void (async () => {
+          const { data: target } = await supabase
+            .from("users")
+            .select("id, display_name")
+            .eq("id", targetId)
+            .single();
+          if (!target) return ackFail("That player no longer exists.");
+          const { error } = await supabase.from("reports").insert({
+            reporter_id: reporterId,
+            target_id: targetId,
+            reason,
+            context,
+            scene: player.scene,
+          });
+          if (error) {
+            console.error("report insert failed", error.message);
+            return ackFail("Couldn't file the report — try again.");
+          }
+          stamps.push(now);
+          reportStamps.set(reporterId, stamps);
+          ws.send(
+            JSON.stringify({
+              type: "report_ack",
+              ok: true,
+              text: `Report filed against ${target.display_name}. The team will take a look — thanks for keeping Pixl safe.`,
+            }),
+          );
+        })().catch(console.error);
       }
 
       if (msg.type === "lobby_join_friend") {
