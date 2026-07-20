@@ -105,6 +105,10 @@ function closeLobby(id: string) {
 
 const SAVE_INTERVAL_MS = 5000;
 
+// Images are not allowed in chat/DMs — strip [img]…[/img] server-side so they
+// never broadcast, store, or reach any client.
+const IMG_TAG_RE = /\[img\b[^\]]*\][\s\S]*?\[\/img\]/gi;
+
 function broadcastToScene(
   scene: string,
   message: object,
@@ -647,6 +651,7 @@ export function attachWebSocketServer(httpServer: Server) {
 
       if (msg.type === "chat") {
         const raw = String(msg.text ?? "")
+          .replace(IMG_TAG_RE, " ")
           .replace(/\s+/g, " ")
           .trim()
           .slice(0, 200);
@@ -683,6 +688,7 @@ export function attachWebSocketServer(httpServer: Server) {
       if (msg.type === "dm") {
         const targetName = String(msg.to ?? "").trim();
         const raw = String(msg.text ?? "")
+          .replace(IMG_TAG_RE, " ")
           .replace(/\s+/g, " ")
           .trim()
           .slice(0, 200);
