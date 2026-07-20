@@ -1,6 +1,6 @@
 import { supabase } from "./db/client.js";
 
-const MODEL = "google/gemini-2.0-flash-001";
+const MODEL = "google/gemini-2.0-flash-lite-preview";
 const LOOKBACK_HOURS = 10;
 const DASH_URL = "https://dash.pixl.rsvp";
 
