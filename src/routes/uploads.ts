@@ -1,5 +1,6 @@
 import express, { Router } from "express";
 import { verifySessionToken } from "../auth/session.js";
+import { checkImageSafe } from "../imageModeration.js";
 
 const router = Router();
 
@@ -23,6 +24,14 @@ router.post(
       return res.status(400).json({ ok: false, error: "empty_body" });
 
     const type = String(req.headers["content-type"] ?? "image/png");
+
+    const safety = await checkImageSafe(buf, type);
+    if (!safety.safe) {
+      return res
+        .status(400)
+        .json({ ok: false, error: "image_rejected", reason: safety.reason });
+    }
+
     const ext = type === "image/jpeg" ? "jpg" : (type.split("/")[1] ?? "png");
     const form = new FormData();
     form.append(
