@@ -371,6 +371,48 @@ router.get("/api/projects/:id/journal", async (req, res) => {
   res.json({ ok: true, entries: data ?? [] });
 });
 
+// Player-visible history for an own project: creation, current ship, and each
+// review verdict with its player-facing note. Internal audit notes are never
+// exposed here.
+router.get("/api/projects/:id/timeline", async (req, res) => {
+  const token = typeof req.query.token === "string" ? req.query.token : "";
+  const session = token ? verifySessionToken(token) : null;
+  if (!session) return res.status(401).json({ ok: false });
+
+  const id = Number(req.params.id);
+  if (!Number.isFinite(id)) return res.status(400).json({ ok: false });
+  if (!(await ownsProject(session.userId, id)))
+    return res.status(404).json({ ok: false });
+
+  const [{ data: proj }, { data: audits }] = await Promise.all([
+    supabase.from("projects").select("created_at, shipped_at, status").eq("id", id).single(),
+    supabase
+      .from("review_audits")
+      .select("verdict, note, claimed_hours, approved_hours, created_at")
+      .eq("project_id", id)
+      .order("created_at", { ascending: true }),
+  ]);
+
+  const events: Record<string, unknown>[] = [];
+  if (proj?.created_at) events.push({ kind: "created", at: proj.created_at });
+  for (const a of audits ?? [])
+    events.push({
+      kind: "review",
+      at: a.created_at,
+      verdict: a.verdict,
+      note: a.note ?? "",
+      claimedHours: a.claimed_hours ?? null,
+      approvedHours: a.approved_hours ?? null,
+    });
+  if (proj?.shipped_at && (proj.status === "shipped" || proj.status === "second_review"))
+    events.push({ kind: "shipped", at: proj.shipped_at });
+
+  events.sort(
+    (a, b) => new Date(a.at as string).getTime() - new Date(b.at as string).getTime(),
+  );
+  res.json({ ok: true, events });
+});
+
 // Add a journal entry (markdown content + optional hours) to an own project.
 router.post("/api/projects/:id/journal", async (req, res) => {
   const token = typeof req.query.token === "string" ? req.query.token : "";
