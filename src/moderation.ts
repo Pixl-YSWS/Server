@@ -288,17 +288,33 @@ export async function recordChatViolation(
   if (n >= BAN_AFTER) {
     const existing = await activeBan(userId);
     if (!existing) {
-      const reason = `Automatic ban: ${n} chat filter violations.`;
-      await supabase
-        .from("bans")
-        .insert({ user_id: userId, reason, banned_by: "Auto-mod" });
-      const body = `You've been banned automatically after ${n} chat filter violations. If you believe this is a mistake, contact the Pixl team.`;
+      const expiresAt = new Date(Date.now() + 7 * 24 * 3600_000).toISOString();
+      const reason = `Automatic 1-week ban: ${n} chat filter violations.`;
+      await supabase.from("bans").insert({
+        user_id: userId,
+        reason,
+        banned_by: "Auto-mod",
+        expires_at: expiresAt,
+      });
+      const { data: recent } = await supabase
+        .from("violations")
+        .select("content")
+        .eq("user_id", userId)
+        .order("created_at", { ascending: false })
+        .limit(5);
+      const list =
+        (recent ?? []).map((v) => `• "${v.content}"`).join("\n") || "(none on record)";
+      const body =
+        `You've been banned from Pixl for 1 week after ${n} chat filter violations.\n\n` +
+        `Your most recent flagged messages:\n${list}\n\n` +
+        `Your ban lifts automatically on ${new Date(expiresAt).toUTCString()}. ` +
+        `If you believe this is a mistake, contact the Pixl team.`;
       await supabase.from("notifications").insert({
         user_id: userId,
-        title: "Banned from Pixl",
+        title: "Banned from Pixl (1 week)",
         body,
       });
-      await dmSlack(userId, `You've been banned from Pixl.\n\n${body}`);
+      await dmSlack(userId, `You've been banned from Pixl for 1 week.\n\n${body}`);
       return { count: n, warned: false, banned: true };
     }
     return { count: n, warned: true, banned: false };
