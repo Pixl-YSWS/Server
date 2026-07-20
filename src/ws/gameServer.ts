@@ -469,21 +469,8 @@ export function attachWebSocketServer(httpServer: Server) {
       if (!player) return;
       if (players.get(player.userId) !== player) return;
 
-      // Binary frames are voice clips: relay them to everyone in the same
-      // scene (proximity = scene), tagged with the speaker's id.
-      if (isBinary) {
-        const data = raw as Buffer;
-        if (data.length > 16000) return;
-        const idBuf = Buffer.from(player.userId, "utf8");
-        const header = Buffer.alloc(2);
-        header.writeUInt16LE(idBuf.length, 0);
-        const frame = Buffer.concat([header, idBuf, data]);
-        for (const [uid, p] of players) {
-          if (uid === player.userId || p.scene !== player.scene) continue;
-          if (p.ws.readyState === WebSocket.OPEN) p.ws.send(frame, { binary: true });
-        }
-        return;
-      }
+      // Voice chat was removed; ignore any stray binary frames.
+      if (isBinary) return;
 
       let msg: any;
       try {
