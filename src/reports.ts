@@ -123,6 +123,22 @@ export async function runReportAnalysis(
         ai_at: new Date().toISOString(),
       })
       .eq("id", reportId);
+
+    // Auto-action on a high-confidence severe verdict: warn the player and log
+    // a violation (which feeds the existing auto-ban escalation). We never
+    // auto-ban straight off an AI call — a human still confirms in the queue.
+    if (result.verdict.toLowerCase() === "severe" && result.score >= 80) {
+      await supabase.from("violations").insert({
+        user_id: targetId,
+        kind: "chat",
+        content: `[AI auto-flag ${result.score}/100] ${result.summary}`.slice(0, 500),
+      });
+      await supabase.from("notifications").insert({
+        user_id: targetId,
+        title: "Chat warning",
+        body: "Your recent chat was flagged as harmful by automated review after a player reported you. Keep it kind — continued behaviour like this leads to a ban.",
+      });
+    }
   }
   return result;
 }
@@ -138,10 +154,14 @@ export async function postReportToSlack(
   const channel = process.env.REPORT_SLACK_CHANNEL;
   if (!token || !channel) return;
   const url = `${DASH_URL}/reports/${reportId}`;
+  const severe = ai != null && ai.verdict.toLowerCase() === "severe" && ai.score >= 80;
   const aiLine = ai
     ? `\n:robot_face: AI: *${ai.verdict}* (${ai.score}/100) — ${ai.summary}`
     : "";
-  const text = `:rotating_light: New report against *${targetName}*\nReason: ${reason || "_none given_"}${aiLine}\n<${url}|Open in dashboard>`;
+  const head = severe
+    ? `<!here> :rotating_light: *SEVERE* report against *${targetName}* — auto-warned, needs review`
+    : `:rotating_light: New report against *${targetName}*`;
+  const text = `${head}\nReason: ${reason || "_none given_"}${aiLine}\n<${url}|Open in dashboard>`;
   try {
     await fetch("https://slack.com/api/chat.postMessage", {
       method: "POST",
