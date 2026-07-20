@@ -28,6 +28,7 @@ interface ConnectedPlayer {
   skin: string;
   lastSaved: number;
   lobbyGrant: string;
+  blocked: Set<string>;
 }
 
 const SKIN_RE = /^(cvc:[1-9]|cv1:b[1-3]h(\d|1[0-8])t([1-9]|1[0-8])o([1-9]|1[0-8]))$/;
@@ -398,6 +399,12 @@ export function attachWebSocketServer(httpServer: Server) {
         }
       }
 
+      const { data: blockRows } = await supabase
+        .from("blocks")
+        .select("blocked_id")
+        .eq("blocker_id", session.userId);
+      const blocked = new Set<string>((blockRows ?? []).map((r) => r.blocked_id as string));
+
       player = {
         ws,
         userId: session.userId,
@@ -409,6 +416,7 @@ export function attachWebSocketServer(httpServer: Server) {
         skin: (userRow as { skin?: string } | null)?.skin ?? "cvc:1",
         lastSaved: Date.now(),
         lobbyGrant,
+        blocked,
       };
       const stale = players.get(session.userId);
       if (stale && stale.ws !== ws) {
@@ -425,6 +433,7 @@ export function attachWebSocketServer(httpServer: Server) {
         }
       }
       players.set(session.userId, player);
+      ws.send(JSON.stringify({ type: "blocks", ids: [...player.blocked] }));
 
       console.log(
         "Player registered. Scene:",
@@ -657,12 +666,18 @@ export function attachWebSocketServer(httpServer: Server) {
             if (error) console.error("chat persist failed", error.message);
           });
 
-        broadcastToScene(player.scene, {
+        const chatFrame = JSON.stringify({
           type: "chat",
           userId: player.userId,
           displayName: player.displayName,
           text,
         });
+        for (const [uid, p] of players) {
+          if (p.scene !== player.scene) continue;
+          // Don't deliver a sender's message to anyone who blocked them.
+          if (uid !== player.userId && p.blocked.has(player.userId)) continue;
+          if (p.ws.readyState === WebSocket.OPEN) p.ws.send(chatFrame);
+        }
       }
 
       if (msg.type === "dm") {
@@ -708,8 +723,38 @@ export function attachWebSocketServer(httpServer: Server) {
           toName: target.displayName,
           text,
         });
-        if (target.ws.readyState === WebSocket.OPEN) target.ws.send(frame);
+        // If the target blocked the sender, silently drop delivery (still echo
+        // to the sender so the block isn't revealed).
+        if (!target.blocked.has(player.userId) && target.ws.readyState === WebSocket.OPEN)
+          target.ws.send(frame);
         ws.send(frame);
+      }
+
+      if (msg.type === "block" || msg.type === "unblock") {
+        const targetId = String(msg.userId ?? "").trim();
+        if (!targetId || targetId === player.userId) return;
+        const self = player;
+        const blocking = msg.type === "block";
+        void (async () => {
+          if (blocking) {
+            await supabase
+              .from("blocks")
+              .upsert(
+                { blocker_id: self.userId, blocked_id: targetId },
+                { onConflict: "blocker_id,blocked_id" },
+              );
+            self.blocked.add(targetId);
+          } else {
+            await supabase
+              .from("blocks")
+              .delete()
+              .eq("blocker_id", self.userId)
+              .eq("blocked_id", targetId);
+            self.blocked.delete(targetId);
+          }
+          if (self.ws.readyState === WebSocket.OPEN)
+            self.ws.send(JSON.stringify({ type: "blocks", ids: [...self.blocked] }));
+        })().catch(console.error);
       }
 
       if (msg.type === "lobby_join_friend") {
