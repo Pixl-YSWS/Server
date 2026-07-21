@@ -42,3 +42,21 @@ export async function approvedHoursFor(
     ) / 10
   );
 }
+
+// Total Restoration Energy pooled by the whole community: every approved hour
+// shipped, summed across all players. Drives the Core Vault's community goals.
+export async function communityEnergy(): Promise<number> {
+  const { data } = await supabase
+    .from("projects")
+    .select("approved_hours, hackatime_seconds")
+    .eq("status", "approved")
+    .is("banned_at", null);
+  const hours = (data ?? []).reduce((s, p) => {
+    const h =
+      p.approved_hours != null
+        ? Number(p.approved_hours)
+        : (Number(p.hackatime_seconds) || 0) / 3600;
+    return s + (Number.isFinite(h) ? h : 0);
+  }, 0);
+  return Math.round(hours);
+}

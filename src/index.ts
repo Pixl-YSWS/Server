@@ -14,6 +14,7 @@ import shopRouter from "./routes/shop.js";
 import eventsRouter from "./routes/events.js";
 import sidequestsRouter from "./routes/sidequests.js";
 import reportsRouter from "./routes/reports.js";
+import vaultRouter from "./routes/vault.js";
 import { rateLimit } from "./rateLimit.js";
 import { attachWebSocketServer } from "./ws/gameServer.js";
 
@@ -54,6 +55,7 @@ app.use(shopRouter);
 app.use(eventsRouter);
 app.use(sidequestsRouter);
 app.use(reportsRouter);
+app.use(vaultRouter);
 
 app.get("/", (_req, res) => res.json({ name: "pixl-server", status: "ok" }));
 app.get("/health", (_req, res) => res.json({ ok: true }));
